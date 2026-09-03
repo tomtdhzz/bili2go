@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"bili2go/internal/app"
 	"bili2go/internal/bilibili"
@@ -16,11 +18,43 @@ import (
 
 // Server 是 HTTP 交付层，依赖应用层 Downloader 用例。
 type Server struct {
-	dl *app.Downloader
+	dl         *app.Downloader
+	limiter    *Limiter
+	cfg        Config
+	retryAfter int
+}
+
+// Config 交付层过载保护与超时配置（tech-design §7.8）。
+type Config struct {
+	MaxConcurrent   int
+	MaxWait         time.Duration
+	DownloadTimeout time.Duration
+	ShutdownGrace   time.Duration
+}
+
+// DefaultConfig 单实例默认：4 并发、5s 排队、30m 单次超时、30s 关闭排空。
+func DefaultConfig() Config {
+	return Config{
+		MaxConcurrent:   4,
+		MaxWait:         5 * time.Second,
+		DownloadTimeout: 30 * time.Minute,
+		ShutdownGrace:   30 * time.Second,
+	}
 }
 
 // New 构造服务器。
-func New(dl *app.Downloader) *Server { return &Server{dl: dl} }
+func New(dl *app.Downloader, cfg Config) *Server {
+	ra := int(cfg.MaxWait / time.Second)
+	if ra < 1 {
+		ra = 1
+	}
+	return &Server{
+		dl:         dl,
+		limiter:    NewLimiter(cfg.MaxConcurrent, cfg.MaxWait),
+		cfg:        cfg,
+		retryAfter: ra,
+	}
+}
 
 // Handler 返回路由。
 func (s *Server) Handler() http.Handler {
@@ -102,6 +136,23 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	release, err := s.limiter.Acquire(r.Context())
+	if err != nil {
+		if errors.Is(err, ErrBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(s.retryAfter))
+			writeErr(w, http.StatusTooManyRequests, -429, "server busy")
+		}
+		return // ctx 取消 → 客户端已断开，无需响应
+	}
+	defer release()
+
+	ctx := r.Context()
+	if s.cfg.DownloadTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DownloadTimeout)
+		defer cancel()
+	}
+
 	tmp, err := os.CreateTemp("", "bili2go-dl-*.mp4")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, -1, err.Error())
@@ -111,7 +162,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	tmp.Close()
 	defer os.Remove(tmpName)
 
-	res, err := s.dl.Download(r.Context(), app.Request{
+	res, err := s.dl.Download(ctx, app.Request{
 		BVID: bvid, Page: page, QN: qn,
 		PreferCodec: prefer, FallbackCodec: domain.CodecAVC,
 	}, tmpName)

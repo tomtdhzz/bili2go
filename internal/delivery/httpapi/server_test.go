@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func (fakeMuxer) Mux(ctx context.Context, v, a, dst string) error {
 
 func testServer() *Server {
 	dl := app.NewDownloader(fakeMeta{}, fakeStreams{}, fakeFetcher{}, fakeMuxer{}, nil)
-	return New(dl)
+	return New(dl, DefaultConfig())
 }
 
 func TestInfoJSON(t *testing.T) {
@@ -110,4 +111,62 @@ func TestMissingBVID(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rr.Code)
 	}
+}
+
+type blockingFetcher struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (f *blockingFetcher) Fetch(ctx context.Context, urls []string, dst string) error {
+	f.once.Do(func() { close(f.entered) })
+	select {
+	case <-f.release:
+		return os.WriteFile(dst, []byte("x"), 0o644)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func saturatedServer() (*blockingFetcher, http.Handler) {
+	bf := &blockingFetcher{entered: make(chan struct{}), release: make(chan struct{})}
+	dl := app.NewDownloader(fakeMeta{}, fakeStreams{}, bf, fakeMuxer{}, nil)
+	cfg := DefaultConfig()
+	cfg.MaxConcurrent = 1
+	cfg.MaxWait = 0
+	return bf, New(dl, cfg).Handler()
+}
+
+// AC-A1：单槽被占且不排队时，新 /download 返回 429 + Retry-After。
+func TestDownloadBusyReturns429(t *testing.T) {
+	bf, h := saturatedServer()
+	go func() {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/download?bvid=BV1&qn=80", nil))
+	}()
+	<-bf.entered // 槽位已占（进入 fetch）
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/download?bvid=BV1&qn=80", nil))
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rr.Code)
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Errorf("missing Retry-After header")
+	}
+	close(bf.release)
+}
+
+// AC-A5：下载饱和时 /api/info 仍可用。
+func TestInfoNotLimitedByDownloads(t *testing.T) {
+	bf, h := saturatedServer()
+	go func() {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/download?bvid=BV1&qn=80", nil))
+	}()
+	<-bf.entered
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/info?bvid=BV1", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("/api/info status = %d during saturation, want 200", rr.Code)
+	}
+	close(bf.release)
 }

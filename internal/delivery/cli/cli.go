@@ -8,6 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"bili2go/internal/app"
 	"bili2go/internal/bilibili"
@@ -158,14 +161,47 @@ func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", ":8080", "监听地址")
 	sd := fs.String("sessdata", "", "SESSDATA（默认取环境变量 BILI_SESSDATA）")
+	cfg := httpapi.DefaultConfig()
+	fs.IntVar(&cfg.MaxConcurrent, "max-concurrent", cfg.MaxConcurrent, "同时进行的下载数上限")
+	fs.DurationVar(&cfg.MaxWait, "max-wait", cfg.MaxWait, "排队等待空位上限（0=不排队）")
+	fs.DurationVar(&cfg.DownloadTimeout, "download-timeout", cfg.DownloadTimeout, "单次下载超时（0=不限）")
+	fs.DurationVar(&cfg.ShutdownGrace, "shutdown-grace", cfg.ShutdownGrace, "优雅关闭排空上限")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	srv := httpapi.New(buildDownloader(resolveSessdata(*sd)))
-	fmt.Fprintf(os.Stderr, "bili2go serving on %s\n", *addr)
-	if err := http.ListenAndServe(*addr, srv.Handler()); err != nil {
+
+	srv := httpapi.New(buildDownloader(resolveSessdata(*sd)), cfg)
+	httpSrv := &http.Server{
+		Addr:              *addr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// 不设 WriteTimeout：长下载由 per-request ctx 超时控制（tech-design §7.8）
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		fmt.Fprintf(os.Stderr, "bili2go serving on %s\n", *addr)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case err := <-errCh:
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	case <-ctx.Done():
+		fmt.Fprintln(os.Stderr, "shutting down…")
+		shutCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownGrace)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutCtx); err != nil {
+			fmt.Fprintln(os.Stderr, "graceful shutdown timed out:", err)
+			return 1
+		}
+		return 0
 	}
-	return 0
 }
