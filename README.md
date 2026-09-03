@@ -12,6 +12,7 @@
 - 音视频分离流并发下载 + 备用源（backupUrl）容灾
 - ffmpeg `-c copy` 无损合并（不转码，秒级）
 - CLI + HTTP API 双入口
+- 多人友好：`serve` 内置并发限流（过载返回 429）与内容缓存/去重（命中秒回）——参数见 `serve -h`，设计见[技术设计](docs/tech-design/tech-design.md) §7.8/§7.9
 - 零第三方依赖（仅 Go 标准库）
 
 ## 环境要求
