@@ -158,6 +158,18 @@ go vet ./...
 - 4K/HDR/杜比/8K（大会员）不保证
 - `/download` 首版为「合并后回传」，暂未实现 Range 分片（拖动/秒开）
 
+## 路线图
+
+- [x] 核心下载：解析 + DASH 选流/降级/编码回退 + 并发下载 + ffmpeg 合并（CLI / HTTP）
+- [x] WS-A 并发治理：`/download` 限流、429/Retry-After、取消传播、优雅关闭
+- [x] WS-C 缓存 / 去重：磁盘 LRU 缓存 + single-flight（命中秒回）
+- [ ] WS-D 鉴权与配额（多人开放部署）
+- [ ] WS-B 流式回传 / Range（拖动、秒开）
+- [ ] WS-E 登录态高清 / 4K·HDR（需 SESSDATA / 大会员）
+- [ ] WS-F 可观测：Prometheus `/metrics`（压测与问题发现的前置）
+
+已发布变更见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 免责声明
 
 本项目仅用于技术学习与研究。使用者须遵守中华人民共和国相关法律法规及哔哩哔哩用户协议，对下载内容的版权负责。作者不对任何滥用行为负责，亦不提供任何商业或非法用途的技术支持。
