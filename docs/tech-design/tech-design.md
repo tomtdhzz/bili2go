@@ -16,7 +16,7 @@
 
 ## 1. 背景与问题陈述
 
-参考项目 `you2php`（PHP）通过"抓 watch 页 HTML → 逆向 JS 签名 → socket 透传字节"实现 YouTube 视频代理下载。本项目将该能力用 Go 重写，目标平台改为哔哩哔哩，下载策略借鉴 `Bilibili-Evolved`。
+参考项目 `you2php`（PHP）通过"抓 watch 页 HTML → 逆向 JS 签名 → socket 透传字节"实现 YouTube 视频代理下载。本项目将该能力用 Go 重写，目标平台改为哔哩哔哩（Bilibili）。
 
 核心问题：Bilibili 的 DASH 格式将音频、视频拆成两路独立流，官方 `playurl` 接口返回各自的 CDN 地址；直接透传单流的旧模型（you2php）不再适用，须**分别下载再合并**。同时 CDN 有请求头校验、清晰度有登录/会员门槛。
 
@@ -184,7 +184,6 @@ type Muxer          interface { Mux(ctx context.Context, videoPath, audioPath, d
 **5.3.2 播放地址 PlayURL（DASH）**
 - `GET https://api.bilibili.com/x/player/playurl?avid=<aid>&cid=<cid>&qn=<qn>&fnval=4048&fnver=0&fourk=1&otype=json`
 - 关键返回：`data.quality`、`data.accept_quality[]`、`data.dash.duration`、`data.dash.video[]`、`data.dash.audio[]`（含 `id/codecid/bandwidth/baseUrl/backupUrl/width/height/frameRate/codecs`）。可选 `dash.dolby`、`dash.flac`（本期忽略）。
-- 来源锚点：Bilibili-Evolved `apis/dash.ts:120-198`、`apis/url.ts:1`。
 
 **5.3.3 必需请求头（所有上游 + CDN 请求）**
 - `Referer: https://www.bilibili.com`
@@ -308,9 +307,9 @@ sequenceDiagram
 |---|---|---|---|
 | 格式 | **DASH** vs FLV/durl | DASH 支持高清/多编码但需合并；FLV 单文件免合并但≤1080P 且被弃用 | 选 DASH（用户指示） |
 | 合并 | **shell ffmpeg** vs Go 原生 mux(如 `abema/go-mp4`) | ffmpeg 稳定通用但引入外部依赖；Go 原生零依赖但 m4s→mp4 封装复杂易错 | 选 shell ffmpeg `-c copy`（不转码，秒级） |
-| 签名 | **普通 playurl** vs wbi 签名端点 | 普通端点简单、BE 在用；部分视频可能 -403 需 wbi（nav 取 key + mixin + md5，见术语表 wbi） | 先普通，实测失败再升级（见 §11 G2） |
+| 签名 | **普通 playurl** vs wbi 签名端点 | 普通端点简单；部分视频可能 -403 需 wbi（nav 取 key + mixin + md5，见术语表 wbi） | 先普通，实测失败再升级（见 §11 G2） |
 | 高清认证 | **配置 SESSDATA** vs 实现登录 | 配置零成本；登录流程复杂且非目标 | 用户提供 SESSDATA |
-| 形态 | **分层单体** vs 插件化(BE 式) | 单体足够；插件化过度设计 | 分层单体 |
+| 形态 | **分层单体** vs 插件化 | 单体足够；插件化过度设计 | 分层单体 |
 | 架构 | **领域中心+端口适配器(轻量)** vs 按技术分层(bili/download) vs 全量 DDD | 领域中心：领域可脱网单测、防腐清晰、Go 惯用；按层：简单但领域与基础设施混杂难测；全量 DDD：仓储/事件总线过度 | 领域中心+端口适配器(轻量) |
 
 ## 7. 横切关注点
@@ -327,7 +326,7 @@ sequenceDiagram
 video/audio 两路 `FetchToFile` 用 `errgroup` 并发；任一失败即取消另一路（`context`）。合并串行等两路完成后执行。
 
 ### 7.4 容灾 / 网络
-每路流 `[]string{BaseURL, BackupURL...}` 顺序尝试；`http:`→`https:` 归一（BE 同款）。设置连接/读超时；大文件用流式 `io.Copy`，不全量入内存。
+每路流 `[]string{BaseURL, BackupURL...}` 顺序尝试；`http:`→`https:` 归一。设置连接/读超时；大文件用流式 `io.Copy`，不全量入内存。
 
 ### 7.5 性能
 下载为 IO 密集，两路并发 + 流式；合并 `-c copy` 不转码。HTTP 出口边合并边回传或合并完再回传（首版：合并到临时文件再回传，简单可靠）。
@@ -386,7 +385,6 @@ video/audio 两路 `FetchToFile` 用 `errgroup` 并发；任一失败即取消�
 
 ## 12. 参考
 
-- Bilibili-Evolved：`registry/lib/components/video/download/apis/{url,dash,flv}.ts`、`components/video/video-quality.ts`。
 - you2php：`YouTubeDownloader.php`（对照旧模型）。
 - 业界 TDD/RFC 结构：Pragmatic Engineer《RFCs and Design Docs》、Google《Software Engineering at Google》(2020) 设计文档章、DevTeam.Space / Slite 设计文档模板。
 

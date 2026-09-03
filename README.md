@@ -2,7 +2,6 @@
 
 用 Go 实现的哔哩哔哩（Bilibili）DASH 视频下载器：解析视频真实播放地址，并发拉取分离的音/视频流，用 ffmpeg 合并为可播放的 MP4。提供 **CLI** 与 **HTTP API** 两种用法。
 
-> 灵感来自 [you2php](https://github.com/You2php/you2php)（PHP 版 YouTube 代理下载）与 [Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved) 的下载实现。
 > 本项目仅供学习与研究，请遵守当地法律法规与 B 站用户协议，勿用于商业或大规模传播。
 
 ## 特性

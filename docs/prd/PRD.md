@@ -6,8 +6,7 @@
 ## 1. 背景与目标
 
 参考项目 `you2php`（PHP）实现了 YouTube 视频代理下载：抓 watch 页 HTML、逆向 JS 签名得到直链、服务端 socket 透传字节。
-本项目 **用 Go 重写下载能力，目标平台改为哔哩哔哩（Bilibili）**，下载策略借鉴 `Bilibili-Evolved`
-（`registry/lib/components/video/download/apis/{url,dash,flv}.ts`、`components/video/video-quality.ts`）。
+本项目 **用 Go 重写下载能力，目标平台改为哔哩哔哩（Bilibili）**，采用官方 `playurl` 接口解析 DASH 音视频流。
 
 与 YouTube 的本质差异（已调研确认）：
 - Bilibili **无需逆向 JS 签名**，直接调 JSON API `playurl` 拿真实流地址。
