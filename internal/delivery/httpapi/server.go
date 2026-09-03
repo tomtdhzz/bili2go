@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"bili2go/internal/app"
 	"bili2go/internal/bilibili"
+	"bili2go/internal/cache"
 	"bili2go/internal/domain"
 )
 
@@ -20,6 +23,7 @@ import (
 type Server struct {
 	dl         *app.Downloader
 	limiter    *Limiter
+	cache      *cache.Cache
 	cfg        Config
 	retryAfter int
 }
@@ -30,6 +34,8 @@ type Config struct {
 	MaxWait         time.Duration
 	DownloadTimeout time.Duration
 	ShutdownGrace   time.Duration
+	CacheDir        string
+	CacheMaxBytes   int64
 }
 
 // DefaultConfig 单实例默认：4 并发、5s 排队、30m 单次超时、30s 关闭排空。
@@ -39,6 +45,8 @@ func DefaultConfig() Config {
 		MaxWait:         5 * time.Second,
 		DownloadTimeout: 30 * time.Minute,
 		ShutdownGrace:   30 * time.Second,
+		CacheDir:        filepath.Join(os.TempDir(), "bili2go-cache"),
+		CacheMaxBytes:   2 << 30,
 	}
 }
 
@@ -48,12 +56,20 @@ func New(dl *app.Downloader, cfg Config) *Server {
 	if ra < 1 {
 		ra = 1
 	}
-	return &Server{
+	s := &Server{
 		dl:         dl,
 		limiter:    NewLimiter(cfg.MaxConcurrent, cfg.MaxWait),
 		cfg:        cfg,
 		retryAfter: ra,
 	}
+	if cfg.CacheMaxBytes > 0 {
+		if c, err := cache.New(cfg.CacheDir, cfg.CacheMaxBytes); err != nil {
+			fmt.Fprintf(os.Stderr, "cache disabled: %v\n", err)
+		} else {
+			s.cache = c
+		}
+	}
+	return s
 }
 
 // Handler 返回路由。
@@ -136,55 +152,79 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	release, err := s.limiter.Acquire(r.Context())
+	// produce（仅 miss 路径执行）：限流 + 单次超时 + 下载合并到 dst。
+	produce := func(ctx context.Context, dst string) (cache.Meta, error) {
+		release, err := s.limiter.Acquire(ctx)
+		if err != nil {
+			return cache.Meta{}, err
+		}
+		defer release()
+		if s.cfg.DownloadTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, s.cfg.DownloadTimeout)
+			defer cancel()
+		}
+		res, err := s.dl.Download(ctx, app.Request{
+			BVID: bvid, Page: page, QN: qn,
+			PreferCodec: prefer, FallbackCodec: domain.CodecAVC,
+		}, dst)
+		if err != nil {
+			return cache.Meta{}, err
+		}
+		return cache.Meta{Title: res.Title, Quality: res.ChosenQuality, Codec: res.Codec}, nil
+	}
+
+	var entry cache.Entry
+	var err error
+	if s.cache != nil {
+		entry, err = s.cache.Get(r.Context(), cacheKey(bvid, page, qn, prefer), produce)
+	} else {
+		var tmp *os.File
+		if tmp, err = os.CreateTemp("", "bili2go-dl-*.mp4"); err == nil {
+			path := tmp.Name()
+			tmp.Close()
+			defer os.Remove(path)
+			var meta cache.Meta
+			meta, err = produce(r.Context(), path)
+			entry = cache.Entry{Path: path, Meta: meta}
+		}
+	}
 	if err != nil {
-		if errors.Is(err, ErrBusy) {
+		switch {
+		case errors.Is(err, ErrBusy):
 			w.Header().Set("Retry-After", strconv.Itoa(s.retryAfter))
 			writeErr(w, http.StatusTooManyRequests, -429, "server busy")
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			// 客户端断开或超时：无需响应
+		default:
+			mapErr(w, err)
 		}
-		return // ctx 取消 → 客户端已断开，无需响应
-	}
-	defer release()
-
-	ctx := r.Context()
-	if s.cfg.DownloadTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DownloadTimeout)
-		defer cancel()
-	}
-
-	tmp, err := os.CreateTemp("", "bili2go-dl-*.mp4")
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, -1, err.Error())
 		return
 	}
-	tmpName := tmp.Name()
-	tmp.Close()
-	defer os.Remove(tmpName)
+	s.serveFile(w, entry, bvid)
+}
 
-	res, err := s.dl.Download(ctx, app.Request{
-		BVID: bvid, Page: page, QN: qn,
-		PreferCodec: prefer, FallbackCodec: domain.CodecAVC,
-	}, tmpName)
-	if err != nil {
-		mapErr(w, err)
-		return
-	}
-	f, err := os.Open(tmpName)
+// cacheKey 由请求参数构造缓存键。
+func cacheKey(bvid string, page, qn int, codec domain.Codec) string {
+	return fmt.Sprintf("%s|p%d|qn%d|%s", bvid, page, qn, codec.String())
+}
+
+// serveFile 回传文件并设响应头（命中/产出统一走此）。
+func (s *Server) serveFile(w http.ResponseWriter, e cache.Entry, bvid string) {
+	f, err := os.Open(e.Path)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, -1, err.Error())
 		return
 	}
 	defer f.Close()
-
-	name := sanitizeFilename(res.Title)
+	name := sanitizeFilename(e.Meta.Title)
 	if name == "" {
 		name = bvid
 	}
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+".mp4\"")
-	w.Header().Set("X-Bili-Quality", strconv.Itoa(res.ChosenQuality.QN))
-	w.Header().Set("X-Bili-Codec", res.Codec.String())
+	w.Header().Set("X-Bili-Quality", strconv.Itoa(e.Meta.Quality.QN))
+	w.Header().Set("X-Bili-Codec", e.Meta.Codec.String())
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, f)
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,7 +49,9 @@ func (fakeMuxer) Mux(ctx context.Context, v, a, dst string) error {
 
 func testServer() *Server {
 	dl := app.NewDownloader(fakeMeta{}, fakeStreams{}, fakeFetcher{}, fakeMuxer{}, nil)
-	return New(dl, DefaultConfig())
+	cfg := DefaultConfig()
+	cfg.CacheMaxBytes = 0 // 隔离：既有测试不走缓存
+	return New(dl, cfg)
 }
 
 func TestInfoJSON(t *testing.T) {
@@ -135,6 +138,7 @@ func saturatedServer() (*blockingFetcher, http.Handler) {
 	cfg := DefaultConfig()
 	cfg.MaxConcurrent = 1
 	cfg.MaxWait = 0
+	cfg.CacheMaxBytes = 0 // 限流测试不走缓存
 	return bf, New(dl, cfg).Handler()
 }
 
@@ -169,4 +173,41 @@ func TestInfoNotLimitedByDownloads(t *testing.T) {
 		t.Fatalf("/api/info status = %d during saturation, want 200", rr.Code)
 	}
 	close(bf.release)
+}
+
+type countingMuxer struct{ n int32 }
+
+func (m *countingMuxer) Mux(ctx context.Context, v, a, dst string) error {
+	atomic.AddInt32(&m.n, 1)
+	return os.WriteFile(dst, []byte("MP4DATA"), 0o644)
+}
+
+// AC-C1：相同请求二次 → 第二次自缓存回传，不再触发上游(muxer)；两次 body 相同。
+func TestDownloadCacheHit(t *testing.T) {
+	mux := &countingMuxer{}
+	dl := app.NewDownloader(fakeMeta{}, fakeStreams{}, fakeFetcher{}, mux, nil)
+	cfg := DefaultConfig()
+	cfg.CacheDir = t.TempDir()
+	cfg.CacheMaxBytes = 1 << 30
+	h := New(dl, cfg).Handler()
+
+	do := func() *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/download?bvid=BV1&qn=80", nil))
+		return rr
+	}
+	r1 := do()
+	r2 := do()
+	if r1.Code != http.StatusOK || r2.Code != http.StatusOK {
+		t.Fatalf("codes r1=%d r2=%d", r1.Code, r2.Code)
+	}
+	if got := atomic.LoadInt32(&mux.n); got != 1 {
+		t.Errorf("mux calls = %d, want 1 (2nd served from cache)", got)
+	}
+	if r1.Body.String() != "MP4DATA" || r2.Body.String() != "MP4DATA" {
+		t.Errorf("bodies: r1=%q r2=%q", r1.Body.String(), r2.Body.String())
+	}
+	if r2.Header().Get("X-Bili-Quality") != "32" {
+		t.Errorf("cached X-Bili-Quality = %q, want 32", r2.Header().Get("X-Bili-Quality"))
+	}
 }

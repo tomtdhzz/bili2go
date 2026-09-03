@@ -166,6 +166,8 @@ func cmdServe(args []string) int {
 	fs.DurationVar(&cfg.MaxWait, "max-wait", cfg.MaxWait, "排队等待空位上限（0=不排队）")
 	fs.DurationVar(&cfg.DownloadTimeout, "download-timeout", cfg.DownloadTimeout, "单次下载超时（0=不限）")
 	fs.DurationVar(&cfg.ShutdownGrace, "shutdown-grace", cfg.ShutdownGrace, "优雅关闭排空上限")
+	fs.StringVar(&cfg.CacheDir, "cache-dir", cfg.CacheDir, "缓存目录")
+	fs.Int64Var(&cfg.CacheMaxBytes, "cache-size", cfg.CacheMaxBytes, "缓存总字节上限（0=禁用缓存与去重）")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

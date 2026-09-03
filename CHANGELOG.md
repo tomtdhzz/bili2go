@@ -21,3 +21,12 @@ this project uses date-based entries (no semantic version tags yet).
   - client-disconnect cancellation aborts in-flight fetch/ffmpeg and frees the slot; per-request `-download-timeout`.
   - graceful shutdown on SIGINT/SIGTERM draining in-flight within `-shutdown-grace`; `http.Server` `ReadHeaderTimeout`/`IdleTimeout`.
   - configurable via `-max-concurrent` (4) / `-max-wait` (5s) / `-download-timeout` (30m) / `-shutdown-grace` (30s). Design: tech-design §7.8.
+- WS-C caching + dedup for the HTTP server (`internal/cache`):
+  - disk content cache keyed by `(bvid,page,qn,codec)`; a hit is served directly — no upstream call, no limiter slot.
+  - single-flight dedup: concurrent identical requests run `produce` once and share the result (one download slot for N requests).
+  - LRU eviction by total bytes; sidecar `.json` metadata; startup scan adopts existing entries (cache survives restart).
+  - `-cache-dir` / `-cache-size` (default `<tmp>/bili2go-cache`, 2 GiB); `-cache-size 0` disables cache+dedup. Design: tech-design §7.9.
+  - measured: cache hit ~0.01s vs miss ~12s for a 40 MB video.
+
+### Fixed
+- `internal/media` ffmpeg muxer now passes explicit `-f mp4`, so muxing no longer depends on the output filename's extension (cache temp files are not `.mp4`).
