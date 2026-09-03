@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "::error::gofmt needed on:"; echo "$out"; exit 1; fi
+          echo "OK: gofmt clean"
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test (race)
+        run: go test -race ./...
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No internal artifacts committed
+        run: |
+          if git ls-files -- '.ai-work' | grep -q .; then
+            echo "::error::.ai-work/ (internal orchestration artifacts) must not be committed"
+            git ls-files -- '.ai-work'
+            exit 1
+          fi
+          if ! grep -q '\.ai-work/' .gitignore; then
+            echo "::error::.gitignore must ignore .ai-work/"
+            exit 1
+          fi
+          echo "OK: no internal artifacts committed; .gitignore covers .ai-work/"
+      - name: Markdown internal links resolve
+        run: |
+          python3 - <<'PY'
+          import re, os, subprocess, sys
+          files = subprocess.check_output(["git", "ls-files", "*.md"]).decode().split()
+          bad = []
+          for f in files:
+              d = os.path.dirname(f)
+              text = open(f, encoding="utf-8").read()
+              for m in re.finditer(r'\]\(([^)]+)\)', text):
+                  target = m.group(1).split()[0].split('#')[0]
+                  if not target or target.startswith(("http://", "https://", "mailto:")):
+                      continue
+                  if not os.path.exists(os.path.join(d, target)):
+                      bad.append(f"{f} -> {target}")
+          if bad:
+              print("::error::broken internal markdown links:")
+              print("\n".join(bad))
+              sys.exit(1)
+          print(f"OK: all internal markdown links resolve ({len(files)} files)")
+          PY

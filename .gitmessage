@@ -1,0 +1,11 @@
+# <type>(<scope>): <imperative summary, <= ~72 chars>
+#
+# Body — state clearly WHAT changed and WHY (one bullet each; the subject is the
+# shape, the body is where a reader learns what you actually did):
+# -
+# - why:
+#
+# type:  feat | fix | docs | refactor | test | ci | chore | perf
+# scope: optional, e.g. domain, app, bilibili, media, httpapi, cli
+# rules: one concern per commit; keep behavior changes separate from docs.
+# footer (optional): Closes #123   |   BREAKING CHANGE: <what breaks>

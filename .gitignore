@@ -1,0 +1,22 @@
+# build output
+/bin/
+/bili2go
+
+# internal orchestration artifacts (ledger/plan/lessons) — not published
+/.ai-work/
+
+# downloaded / test media
+*.mp4
+*.m4s
+*.flv
+
+# go
+*.test
+*.out
+coverage.*
+
+# editor / os
+.DS_Store
+*.swp
+.idea/
+.vscode/
