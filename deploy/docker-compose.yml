@@ -1,0 +1,24 @@
+# bili2go 分析链路的 docker 边界：仅 LLM 摘要服务。
+#
+# 边界说明：video-digest（转写 + 画面关键字）依赖 macOS 原生框架
+# （AVFoundation/Speech/Vision），无法进容器，运行在宿主机；本 compose 只承载
+# 可容器化的 LLM 摘要部分。bili2go 宿主进程 exec 宿主 video-digest，再通过
+# HTTP 调用此服务产出 summary.md。
+#
+# 用法：
+#   cd deploy && docker compose up -d --build
+#   # 接真实 LLM（OpenAI 兼容端点）：
+#   OPENAI_BASE_URL=https://api.openai.com/v1 OPENAI_API_KEY=sk-... docker compose up -d --build
+#   # 不配 LLM 时服务走确定性模板回退，离线可用。
+services:
+  summarizer:
+    build: ./summarizer
+    image: bili2go-summarizer:latest
+    ports:
+      - "8091:8091"
+    environment:
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-gpt-4o-mini}"
+      SUMMARY_TOP: "${SUMMARY_TOP:-25}"
+    restart: unless-stopped

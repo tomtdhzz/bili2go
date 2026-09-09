@@ -64,6 +64,7 @@ go run ./cmd/bili2go serve -addr :8080
 - `info`：查询可用清晰度与信息（不下载），支持 `-bvid -page -qn -codec -sessdata`
 - `dl`：下载并合并 mp4，支持 `info` 的全部参数，外加**必填** `-o`
 - `serve`：启动 HTTP 服务，支持 `-addr -sessdata`
+- `analyze`：**下载后分析** —— 下载（或对 `-video` 本地文件）跑 `video-digest` 转写 + 画面关键字，再经摘要服务产出 `summary.md`（见下方「下载后分析」）
 
 | 参数 | 适用 | 默认 | 含义 |
 |---|---|---|---|
@@ -111,6 +112,45 @@ export BILI_SESSDATA={你的SESSDATA}
 go run ./cmd/bili2go dl -bvid {BVID} -qn 80 -o out.mp4
 # 或给各子命令传 -sessdata {值}
 ```
+
+## 下载后分析（analyze）
+
+在下载能力之上叠加「下载 → 分析 → summary.md」链路：用 `video-digest`（Apple 原生离线工具）把视频离线拆成
+带时间戳的口述转写 + 画面未口述关键字（`digest.json` / `transcript.md`），再由 LLM 摘要服务产出人读的
+`summary.md`（固定五节，每条结论挂时间码）。
+
+两条腿：
+
+- **本地分析**：exec 宿主上的 `video-digest` 二进制（依赖 macOS 原生 AVFoundation/Speech/Vision，**不进 Docker**）。
+- **LLM 摘要**：`deploy/` 下的 Docker 服务，接 OpenAI 兼容端点；未配置 LLM 时走**确定性模板回退**，离线可跑。
+
+> 分析链路是外围能力，落在 `internal/analyze`，仅用 Go 标准库（`os/exec` + `net/http`）；LLM 依赖下沉到
+> Docker，核心 domain/app 仍零第三方依赖。
+
+```bash
+# 1) 起摘要服务（Docker）。不配 LLM 走回退；配 LLM 见 deploy/docker-compose.yml 注释。
+cd deploy && docker compose up -d --build && cd ..
+
+# 2a) 对已下载的本地视频分析
+go run ./cmd/bili2go analyze -video out.mp4 \
+  -digest-bin /path/to/video-digest/bin/video-digest
+
+# 2b) 给 bvid：先下载再分析（-o 省略则下载到临时文件，分析后删除，除非 -keep-video）
+go run ./cmd/bili2go analyze -bvid {BVID} -qn 32 \
+  -digest-bin /path/to/video-digest/bin/video-digest -keep-video -o out.mp4
+# → 产物：<stem>.digest/{digest.json, transcript.md, summary.md}；stdout 打印 summary.md 路径
+```
+
+| 参数 | 默认 | 含义 |
+|---|---|---|
+| `-video` | — | 分析本地视频（跳过下载）；与 `-bvid` 二选一 |
+| `-digest-bin` | `$VIDEO_DIGEST_BIN`→PATH | `video-digest` 二进制路径 |
+| `-summarizer` | `$BILI_SUMMARIZER_URL`→`http://127.0.0.1:8091` | 摘要服务地址 |
+| `-lang` / `-keywords` | `zh-CN` / `unspoken` | 转写 locale / 画面关键字模式（`unspoken`\|`all`） |
+| `-digest-out` / `-top` | `<stem>.digest/` / `25` | 产物目录 / 摘要取前 N 关键字 |
+| `-keep-video` | 关 | 保留下载的视频（默认下载到临时文件并删除） |
+
+需求与契约见 [PRD-analyze](docs/prd/PRD-analyze.md) 与 [tech-design-analyze](docs/tech-design/tech-design-analyze.md)。
 
 ## 架构
 
@@ -163,6 +203,7 @@ go vet ./...
 - [x] 核心下载：解析 + DASH 选流/降级/编码回退 + 并发下载 + ffmpeg 合并（CLI / HTTP）
 - [x] WS-A 并发治理：`/download` 限流、429/Retry-After、取消传播、优雅关闭
 - [x] WS-C 缓存 / 去重：磁盘 LRU 缓存 + single-flight（命中秒回）
+- [x] WS-G 下载后分析：`analyze` 子命令（video-digest 转写/画面关键字 + Docker LLM 摘要 → `summary.md`）
 - [ ] WS-D 鉴权与配额（多人开放部署）
 - [ ] WS-B 流式回传 / Range（拖动、秒开）
 - [ ] WS-E 登录态高清 / 4K·HDR（需 SESSDATA / 大会员）

@@ -28,5 +28,18 @@ this project uses date-based entries (no semantic version tags yet).
   - `-cache-dir` / `-cache-size` (default `<tmp>/bili2go-cache`, 2 GiB); `-cache-size 0` disables cache+dedup. Design: tech-design §7.9.
   - measured: cache hit ~0.01s vs miss ~12s for a 40 MB video.
 
+- WS-G post-download analysis: `analyze` subcommand producing a readable `summary.md`.
+  - `internal/analyze` (Go stdlib only) — `Analyzer` use case + ports `Digester`/`Summarizer`;
+    `ExecDigester` execs the host `video-digest` binary (macOS-native transcription + on-screen keywords),
+    `HTTPSummarizer` POSTs `digest.json` to the summarizer service. Chain: download → digest → summarize → `summary.md`.
+  - `deploy/summarizer` — Dockerized LLM summary service (Python stdlib): `GET /health`, `POST /summarize`;
+    OpenAI-compatible endpoint when configured, deterministic template fallback otherwise (offline-runnable).
+    Fixed 5-section `summary.md` with per-conclusion timecodes; gaps reproduced verbatim; no fabricated speech.
+  - `deploy/docker-compose.yml` — summarizer service on :8091. Boundary: `video-digest` stays on the host
+    (macOS-native frameworks cannot be containerized); only the LLM summary is Dockerized.
+  - CLI flags: `-video`/`-bvid`, `-digest-bin`, `-summarizer`, `-lang`, `-keywords`, `-digest-out`, `-top`, `-keep-video`.
+    Pre-flights the summarizer `/health` before the expensive download+digest so a down service fails fast (~0.5s).
+    Design: `docs/prd/PRD-analyze.md`, `docs/tech-design/tech-design-analyze.md`.
+
 ### Fixed
 - `internal/media` ffmpeg muxer now passes explicit `-f mp4`, so muxing no longer depends on the output filename's extension (cache temp files are not `.mp4`).

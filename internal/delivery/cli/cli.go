@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"bili2go/internal/analyze"
 	"bili2go/internal/app"
 	"bili2go/internal/bilibili"
 	"bili2go/internal/delivery/httpapi"
@@ -32,6 +33,8 @@ func Run(args []string) int {
 		return cmdDownload(args[1:])
 	case "serve":
 		return cmdServe(args[1:])
+	case "analyze":
+		return cmdAnalyze(args[1:])
 	case "-h", "--help", "help":
 		usage()
 		return 0
@@ -48,7 +51,8 @@ func usage() {
 用法:
   bili2go info  -bvid <BV|url> [-page N]
   bili2go dl    -bvid <BV|url> [-page N] [-qn 80] [-codec avc] -o out.mp4
-  bili2go serve [-addr :8080]
+  bili2go serve    [-addr :8080]
+  bili2go analyze  -bvid <BV|url> [-o out.mp4] | -video <path> [-summarizer URL]
 
 SESSDATA: 环境变量 BILI_SESSDATA 或各子命令的 -sessdata
 `)
@@ -206,4 +210,113 @@ func cmdServe(args []string) int {
 		}
 		return 0
 	}
+}
+
+func cmdAnalyze(args []string) int {
+	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	bvid := fs.String("bvid", "", "BV 号或视频 URL（下载后分析；与 -video 二选一）")
+	video := fs.String("video", "", "分析已存在的本地视频文件（跳过下载）")
+	out := fs.String("o", "", "下载输出 mp4 路径（-bvid 模式；留空则用临时文件，分析后删除，除非 -keep-video）")
+	page := fs.Int("page", 0, "分 P（默认 1）")
+	qn := fs.Int("qn", 0, "清晰度码（默认取可用最高）")
+	codec := fs.String("codec", "avc", "编码 avc/hevc/av1")
+	sd := fs.String("sessdata", "", "SESSDATA（默认取环境变量 BILI_SESSDATA）")
+	digestBin := fs.String("digest-bin", "", "video-digest 二进制路径（默认取环境变量 VIDEO_DIGEST_BIN，否则 PATH 中的 video-digest）")
+	summarizer := fs.String("summarizer", "", "摘要服务地址（默认取环境变量 BILI_SUMMARIZER_URL，否则 http://127.0.0.1:8091）")
+	lang := fs.String("lang", "zh-CN", "转写 locale")
+	keywords := fs.String("keywords", "unspoken", "画面关键字模式 unspoken/all")
+	digestOut := fs.String("digest-out", "", "分析产物目录（默认 <video 同目录>/<stem>.digest/）")
+	top := fs.Int("top", 25, "摘要中画面关键字取前 N 条")
+	keepVideo := fs.Bool("keep-video", false, "分析后保留下载的视频（默认下载到临时文件并删除）")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *video == "" && *bvid == "" {
+		fmt.Fprintln(os.Stderr, "need -video <path> or -bvid <BV|url>")
+		return 2
+	}
+	prefer, ok := domain.ParseCodec(*codec)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "invalid -codec (avc/hevc/av1)")
+		return 2
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	summarizerURL := *summarizer
+	if summarizerURL == "" {
+		summarizerURL = os.Getenv("BILI_SUMMARIZER_URL")
+	}
+	sum := analyze.NewHTTPSummarizer(summarizerURL, *top)
+	// 前置探活：在昂贵的下载 + digest 之前确认摘要服务可用，避免白跑（requirement-orchestrator target-system preflight）。
+	hctx, hcancel := context.WithTimeout(ctx, 5*time.Second)
+	healthErr := sum.Health(hctx)
+	hcancel()
+	if healthErr != nil {
+		fmt.Fprintln(os.Stderr, healthErr)
+		fmt.Fprintln(os.Stderr, "hint: 先启动摘要服务：cd deploy && docker compose up -d --build")
+		return 1
+	}
+
+	videoPath := *video
+	var cleanup func()
+	if videoPath == "" {
+		dst := *out
+		removeAfter := false
+		if dst == "" {
+			f, err := os.CreateTemp("", "bili2go-analyze-*.mp4")
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+			dst = f.Name()
+			f.Close()
+			removeAfter = !*keepVideo
+		}
+		dl := buildDownloader(resolveSessdata(*sd))
+		res, err := dl.Download(ctx, app.Request{
+			BVID: *bvid, Page: *page, QN: *qn,
+			PreferCodec: prefer, FallbackCodec: domain.CodecAVC,
+		}, dst)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "downloaded %s (%s/%s) -> %s\n",
+			res.Title, res.ChosenQuality.Name, res.Codec.String(), dst)
+		videoPath = dst
+		if removeAfter {
+			cleanup = func() { os.Remove(dst) }
+		}
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	digester := analyze.NewExecDigester(envOr(*digestBin, "VIDEO_DIGEST_BIN"))
+	digester.Lang = *lang
+	digester.Keywords = *keywords
+	az := analyze.NewAnalyzer(digester, sum)
+
+	rep, err := az.Analyze(ctx, videoPath, *digestOut)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	m := rep.Digest.Meta
+	fmt.Fprintf(os.Stderr, "analyzed: 时长%.0fs 音轨%v 转写%s/%d段 关键字%d gaps%d model=%s fallback=%v\n",
+		m.DurationS, m.HasAudio, m.Engine, m.Segments, m.Keywords, m.Gaps, rep.Summary.Model, rep.Summary.Fallback)
+	if rep.Summary.Reason != "" {
+		fmt.Fprintln(os.Stderr, "note:", rep.Summary.Reason)
+	}
+	fmt.Println(rep.SummaryPath)
+	return 0
+}
+
+func envOr(flagVal, key string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	return os.Getenv(key)
 }

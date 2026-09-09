@@ -5,6 +5,9 @@
 # internal orchestration artifacts (ledger/plan/lessons) — not published
 /.ai-work/
 
+# maestri session/role infra — not project code
+/.maestri/
+
 # downloaded / test media
 *.mp4
 *.m4s

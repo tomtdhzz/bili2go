@@ -1,0 +1,339 @@
+{
+  "frames" : [
+    {
+      "index" : 0,
+      "ocr" : [
+        {
+          "bbox" : [
+            0.068699999999999997,
+            0.81940000000000002,
+            0.37969999999999998,
+            0.080600000000000005
+          ],
+          "confidence" : 0.5,
+          "text" : "2026 Q3 增长复盘"
+        },
+        {
+          "bbox" : [
+            0.070300000000000001,
+            0.46110000000000001,
+            0.2641,
+            0.063899999999999998
+          ],
+          "confidence" : 0.5,
+          "text" : "GMV 同比 +38%"
+        },
+        {
+          "bbox" : [
+            0.071900000000000006,
+            0.10000000000000001,
+            0.18590000000000001,
+            0.038899999999999997
+          ],
+          "confidence" : 0.5,
+          "text" : "内部资料•请勿外传"
+        }
+      ],
+      "path" : "frames/f00000.jpg",
+      "t_s" : 0
+    },
+    {
+      "index" : 1,
+      "ocr" : [
+        {
+          "bbox" : [
+            0.070800000000000002,
+            0.81479999999999997,
+            0.65000000000000002,
+            0.096299999999999997
+          ],
+          "confidence" : 0.5,
+          "text" : "履约时效 P95 = 4.2h（SLA 3h）"
+        },
+        {
+          "bbox" : [
+            0.070300000000000001,
+            0.46339999999999998,
+            0.19070000000000001,
+            0.067699999999999996
+          ],
+          "confidence" : 0.5,
+          "text" : "退款率 1.7％"
+        },
+        {
+          "bbox" : [
+            0.071900000000000006,
+            0.10000000000000001,
+            0.18590000000000001,
+            0.038899999999999997
+          ],
+          "confidence" : 0.29999999999999999,
+          "text" : "内部资料•请勿外传"
+        }
+      ],
+      "path" : "frames/f00001.jpg",
+      "t_s" : 14
+    },
+    {
+      "index" : 2,
+      "ocr" : [
+        {
+          "bbox" : [
+            0.068699999999999997,
+            0.81110000000000004,
+            0.7984,
+            0.091700000000000004
+          ],
+          "confidence" : 0.29999999999999999,
+          "text" : "Roadmap:RAG 检索重排 /多模态入库"
+        },
+        {
+          "bbox" : [
+            0.070300000000000001,
+            0.46629999999999999,
+            0.18759999999999999,
+            0.061800000000000001
+          ],
+          "confidence" : 0.29999999999999999,
+          "text" : "预算 240万"
+        },
+        {
+          "bbox" : [
+            0.071900000000000006,
+            0.10000000000000001,
+            0.18590000000000001,
+            0.038899999999999997
+          ],
+          "confidence" : 0.5,
+          "text" : "内部资料•请勿外传"
+        }
+      ],
+      "path" : "frames/f00002.jpg",
+      "t_s" : 26
+    }
+  ],
+  "gaps" : [
+
+  ],
+  "run" : {
+    "generated_at" : "2026-09-09T09:29:28Z",
+    "params" : {
+      "dedupe_threshold" : "8",
+      "keywords" : "unspoken",
+      "lang" : "zh-CN",
+      "max_frames" : "600",
+      "no_frames" : "false",
+      "sample_interval" : "2.0"
+    },
+    "tool_version" : "0.1.0"
+  },
+  "schema_version" : "1",
+  "screen_keywords" : [
+    {
+      "evidence_frames" : [
+        1
+      ],
+      "first_t_s" : 14,
+      "is_chrome" : false,
+      "last_t_s" : 14,
+      "occurrences" : 1,
+      "score" : 1.724,
+      "spoken_in_transcript" : false,
+      "term" : "履约时效 P95 = 4.2h（SLA 3h）"
+    },
+    {
+      "evidence_frames" : [
+        2
+      ],
+      "first_t_s" : 26,
+      "is_chrome" : false,
+      "last_t_s" : 26,
+      "occurrences" : 1,
+      "score" : 1.6439999999999999,
+      "spoken_in_transcript" : false,
+      "term" : "Roadmap:RAG 检索重排 /多模态入库"
+    },
+    {
+      "evidence_frames" : [
+        1
+      ],
+      "first_t_s" : 14,
+      "is_chrome" : false,
+      "last_t_s" : 14,
+      "occurrences" : 1,
+      "score" : 1.3400000000000001,
+      "spoken_in_transcript" : false,
+      "term" : "退款率 1.7％"
+    },
+    {
+      "evidence_frames" : [
+        2
+      ],
+      "first_t_s" : 26,
+      "is_chrome" : false,
+      "last_t_s" : 26,
+      "occurrences" : 1,
+      "score" : 1.294,
+      "spoken_in_transcript" : false,
+      "term" : "预算 240万"
+    }
+  ],
+  "screen_text" : {
+    "blocks" : [
+      {
+        "evidence_frames" : [
+          0,
+          1,
+          2
+        ],
+        "first_t_s" : 0,
+        "is_chrome" : true,
+        "last_t_s" : 26,
+        "max_confidence" : 0.5,
+        "mean_bbox" : [
+          0.071900000000000006,
+          0.10000000000000001,
+          0.18590000000000001,
+          0.038899999999999997
+        ],
+        "occurrences" : 3,
+        "text" : "内部资料•请勿外传"
+      },
+      {
+        "evidence_frames" : [
+          0
+        ],
+        "first_t_s" : 0,
+        "is_chrome" : false,
+        "last_t_s" : 0,
+        "max_confidence" : 0.5,
+        "mean_bbox" : [
+          0.068699999999999997,
+          0.81940000000000002,
+          0.37969999999999998,
+          0.080600000000000005
+        ],
+        "occurrences" : 1,
+        "text" : "2026 Q3 增长复盘"
+      },
+      {
+        "evidence_frames" : [
+          0
+        ],
+        "first_t_s" : 0,
+        "is_chrome" : false,
+        "last_t_s" : 0,
+        "max_confidence" : 0.5,
+        "mean_bbox" : [
+          0.070300000000000001,
+          0.46110000000000001,
+          0.2641,
+          0.063899999999999998
+        ],
+        "occurrences" : 1,
+        "text" : "GMV 同比 +38%"
+      },
+      {
+        "evidence_frames" : [
+          1
+        ],
+        "first_t_s" : 14,
+        "is_chrome" : false,
+        "last_t_s" : 14,
+        "max_confidence" : 0.5,
+        "mean_bbox" : [
+          0.070800000000000002,
+          0.81479999999999997,
+          0.65000000000000002,
+          0.096299999999999997
+        ],
+        "occurrences" : 1,
+        "text" : "履约时效 P95 = 4.2h（SLA 3h）"
+      },
+      {
+        "evidence_frames" : [
+          1
+        ],
+        "first_t_s" : 14,
+        "is_chrome" : false,
+        "last_t_s" : 14,
+        "max_confidence" : 0.5,
+        "mean_bbox" : [
+          0.070300000000000001,
+          0.46339999999999998,
+          0.19070000000000001,
+          0.067699999999999996
+        ],
+        "occurrences" : 1,
+        "text" : "退款率 1.7％"
+      },
+      {
+        "evidence_frames" : [
+          2
+        ],
+        "first_t_s" : 26,
+        "is_chrome" : false,
+        "last_t_s" : 26,
+        "max_confidence" : 0.29999999999999999,
+        "mean_bbox" : [
+          0.068699999999999997,
+          0.81110000000000004,
+          0.7984,
+          0.091700000000000004
+        ],
+        "occurrences" : 1,
+        "text" : "Roadmap:RAG 检索重排 /多模态入库"
+      },
+      {
+        "evidence_frames" : [
+          2
+        ],
+        "first_t_s" : 26,
+        "is_chrome" : false,
+        "last_t_s" : 26,
+        "max_confidence" : 0.29999999999999999,
+        "mean_bbox" : [
+          0.070300000000000001,
+          0.46629999999999999,
+          0.18759999999999999,
+          0.061800000000000001
+        ],
+        "occurrences" : 1,
+        "text" : "预算 240万"
+      }
+    ],
+    "engine" : "Vision/VNRecognizeTextRequest"
+  },
+  "source" : {
+    "duration_s" : 39,
+    "fps" : 5,
+    "has_audio" : true,
+    "has_video" : true,
+    "height" : 720,
+    "path" : "/tmp/vd_fixture.mp4",
+    "size_bytes" : 499111,
+    "width" : 1280
+  },
+  "transcript" : {
+    "engine" : "SpeechTranscriber",
+    "locale" : "zh-CN",
+    "segments" : [
+      {
+        "end_s" : 13.800000000000001,
+        "start_s" : 0,
+        "text" : "大家好 ，下面开始 2026年第三季度的增长复盘 GMV同比增长 38%是本季度最主要的增长来源"
+      },
+      {
+        "end_s" : 20.579999999999998,
+        "start_s" : 13.800000000000001,
+        "text" : "履约时效目前存在风险需要重点关注。"
+      },
+      {
+        "end_s" : 32.460000000000001,
+        "start_s" : 26.579999999999998,
+        "text" : "最后介绍第四季度的路线图。"
+      }
+    ],
+    "text" : "大家好 ，下面开始 2026年第三季度的增长复盘 GMV同比增长 38%是本季度最主要的增长来源履约时效目前存在风险需要重点关注。最后介绍第四季度的路线图。"
+  }
+}
