@@ -32,7 +32,7 @@ this project uses date-based entries (no semantic version tags yet).
   - `internal/analyze` (Go stdlib only) — `Analyzer` use case + ports `Digester`/`Summarizer`;
     `ExecDigester` execs the host `video-digest` binary (macOS-native transcription + on-screen keywords),
     `HTTPSummarizer` POSTs `digest.json` to the summarizer service. Chain: download → digest → summarize → `summary.md`.
-  - `deploy/summarizer` — Dockerized LLM summary service (Python stdlib): `GET /health`, `POST /summarize`;
+  - `cmd/summarizer` + `internal/summarizer` — Dockerized LLM summary service (Go stdlib): `GET /health`, `POST /summarize`;
     OpenAI-compatible endpoint when configured, deterministic template fallback otherwise (offline-runnable).
     Fixed 5-section `summary.md` with per-conclusion timecodes; gaps reproduced verbatim; no fabricated speech.
   - `deploy/docker-compose.yml` — summarizer service on :8091. Boundary: `video-digest` stays on the host
@@ -40,6 +40,21 @@ this project uses date-based entries (no semantic version tags yet).
   - CLI flags: `-video`/`-bvid`, `-digest-bin`, `-summarizer`, `-lang`, `-keywords`, `-digest-out`, `-top`, `-keep-video`.
     Pre-flights the summarizer `/health` before the expensive download+digest so a down service fails fast (~0.5s).
     Design: `docs/prd/PRD-analyze.md`, `docs/tech-design/tech-design-analyze.md`.
+- WS-D summarizer authentication: opt-in bearer token on the summary service.
+  - `internal/summarizer` server — when `SUMMARIZER_TOKEN` is set, `POST /summarize` requires
+    `Authorization: Bearer <token>` (constant-time compare) or returns `401` with
+    `WWW-Authenticate: Bearer`; `GET /health` stays open for probes/preflight. Token unset →
+    no auth (backward-compatible, offline-runnable).
+  - `internal/analyze` `HTTPSummarizer` sends the bearer header; `analyze` CLI gains
+    `-summarizer-token` (default env `BILI_SUMMARIZER_TOKEN`).
+  - `deploy/docker-compose.yml` injects `SUMMARIZER_TOKEN`. Closes the H1 exposure gap
+    (public `:8091` could be abused to run up LLM cost).
+- summarizer single-language rewrite (Go): the summary service is reimplemented from Python stdlib to
+  Go stdlib (`cmd/summarizer` + `internal/summarizer`), making the repo single-language (Go + the host
+  `video-digest` binary). HTTP contract, five-section output (byte-for-byte parity via golden), bearer
+  auth and offline fallback all unchanged; `internal/analyze` consumer untouched. Docker image is now a
+  distroless static binary (~3 MB vs the Python image), health check via `summarizer health` (no shell).
+  Design: `docs/prd/PRD-summarizer-go.md`, `docs/tech-design/tech-design-summarizer-go.md`.
 
 ### Fixed
 - `internal/media` ffmpeg muxer now passes explicit `-f mp4`, so muxing no longer depends on the output filename's extension (cache temp files are not `.mp4`).

@@ -1,0 +1,8 @@
+# summarizer 镜像只需 go.mod + cmd/ + internal/；其余排除以缩小构建上下文。
+.git
+.ai-work
+/bili2go
+docs
+scripts
+deploy
+*.md
