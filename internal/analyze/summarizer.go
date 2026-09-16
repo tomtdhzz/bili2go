@@ -18,17 +18,19 @@ import (
 type HTTPSummarizer struct {
 	BaseURL string       // 如 http://127.0.0.1:8091
 	Top     int          // 关键字取前 N；<=0 时不传，用服务默认
+	Token   string       // 可空；非空时 /summarize 带 Authorization: Bearer <token>
 	Client  *http.Client // 可空，默认 120s 超时
 }
 
-// NewHTTPSummarizer 构造。baseURL 为空时用 http://127.0.0.1:8091。
-func NewHTTPSummarizer(baseURL string, top int) *HTTPSummarizer {
+// NewHTTPSummarizer 构造。baseURL 为空时用 http://127.0.0.1:8091；token 为空则不鉴权。
+func NewHTTPSummarizer(baseURL string, top int, token string) *HTTPSummarizer {
 	if baseURL == "" {
 		baseURL = "http://127.0.0.1:8091"
 	}
 	return &HTTPSummarizer{
 		BaseURL: baseURL,
 		Top:     top,
+		Token:   token,
 		Client:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
@@ -44,6 +46,9 @@ func (h *HTTPSummarizer) Summarize(ctx context.Context, digestJSON []byte) (Summ
 		return Summary{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if h.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+h.Token)
+	}
 
 	client := h.Client
 	if client == nil {

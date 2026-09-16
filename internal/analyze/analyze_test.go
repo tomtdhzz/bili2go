@@ -110,7 +110,7 @@ func TestHTTPSummarizerRoundTrip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewHTTPSummarizer(srv.URL, 10)
+	s := NewHTTPSummarizer(srv.URL, 10, "")
 	out, err := s.Summarize(context.Background(), []byte(fixtureDigest))
 	if err != nil {
 		t.Fatal(err)
@@ -126,6 +126,32 @@ func TestHTTPSummarizerRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHTTPSummarizerSendsToken(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if gotAuth != "Bearer s3cret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"markdown": "## ① ok\n", "model": "fallback", "fallback": true})
+	}))
+	defer srv.Close()
+
+	// 带正确 token → 服务端 200
+	if _, err := NewHTTPSummarizer(srv.URL, 0, "s3cret").Summarize(context.Background(), []byte(fixtureDigest)); err != nil {
+		t.Fatalf("with token: %v", err)
+	}
+	if gotAuth != "Bearer s3cret" {
+		t.Errorf("Authorization = %q, want Bearer s3cret", gotAuth)
+	}
+	// 空 token → 服务端 401 → 客户端报错
+	if _, err := NewHTTPSummarizer(srv.URL, 0, "").Summarize(context.Background(), []byte(fixtureDigest)); err == nil || !strings.Contains(err.Error(), "401") {
+		t.Errorf("without token err = %v, want 401 propagated", err)
+	}
+}
+
 func TestHTTPSummarizerErrorStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -133,7 +159,7 @@ func TestHTTPSummarizerErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewHTTPSummarizer(srv.URL, 0)
+	s := NewHTTPSummarizer(srv.URL, 0, "")
 	_, err := s.Summarize(context.Background(), []byte(`{}`))
 	if err == nil || !strings.Contains(err.Error(), "缺少必需字段") {
 		t.Errorf("err = %v, want propagated service error", err)
@@ -160,7 +186,7 @@ func TestHTTPSummarizerHealth(t *testing.T) {
 		w.Write([]byte(`{"status":"ok","llm":false}`))
 	}))
 	defer ok.Close()
-	if err := NewHTTPSummarizer(ok.URL, 0).Health(context.Background()); err != nil {
+	if err := NewHTTPSummarizer(ok.URL, 0, "").Health(context.Background()); err != nil {
 		t.Errorf("healthy service: %v", err)
 	}
 
@@ -168,11 +194,11 @@ func TestHTTPSummarizerHealth(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer bad.Close()
-	if err := NewHTTPSummarizer(bad.URL, 0).Health(context.Background()); err == nil {
+	if err := NewHTTPSummarizer(bad.URL, 0, "").Health(context.Background()); err == nil {
 		t.Errorf("expected health error on 503")
 	}
 
-	if err := NewHTTPSummarizer("http://127.0.0.1:9", 0).Health(context.Background()); err == nil {
+	if err := NewHTTPSummarizer("http://127.0.0.1:9", 0, "").Health(context.Background()); err == nil {
 		t.Errorf("expected error on unreachable host")
 	}
 }

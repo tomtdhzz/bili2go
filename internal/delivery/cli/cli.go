@@ -223,6 +223,7 @@ func cmdAnalyze(args []string) int {
 	sd := fs.String("sessdata", "", "SESSDATA（默认取环境变量 BILI_SESSDATA）")
 	digestBin := fs.String("digest-bin", "", "video-digest 二进制路径（默认取环境变量 VIDEO_DIGEST_BIN，否则 PATH 中的 video-digest）")
 	summarizer := fs.String("summarizer", "", "摘要服务地址（默认取环境变量 BILI_SUMMARIZER_URL，否则 http://127.0.0.1:8091）")
+	summarizerToken := fs.String("summarizer-token", "", "摘要服务 token（默认取环境变量 BILI_SUMMARIZER_TOKEN；服务端设 SUMMARIZER_TOKEN 时必填）")
 	lang := fs.String("lang", "zh-CN", "转写 locale")
 	keywords := fs.String("keywords", "unspoken", "画面关键字模式 unspoken/all")
 	digestOut := fs.String("digest-out", "", "分析产物目录（默认 <video 同目录>/<stem>.digest/）")
@@ -248,7 +249,11 @@ func cmdAnalyze(args []string) int {
 	if summarizerURL == "" {
 		summarizerURL = os.Getenv("BILI_SUMMARIZER_URL")
 	}
-	sum := analyze.NewHTTPSummarizer(summarizerURL, *top)
+	summarizerTok := *summarizerToken
+	if summarizerTok == "" {
+		summarizerTok = os.Getenv("BILI_SUMMARIZER_TOKEN")
+	}
+	sum := analyze.NewHTTPSummarizer(summarizerURL, *top, summarizerTok)
 	// 前置探活：在昂贵的下载 + digest 之前确认摘要服务可用，避免白跑（requirement-orchestrator target-system preflight）。
 	hctx, hcancel := context.WithTimeout(ctx, 5*time.Second)
 	healthErr := sum.Health(hctx)

@@ -146,6 +146,7 @@ go run ./cmd/bili2go analyze -bvid {BVID} -qn 32 \
 | `-video` | — | 分析本地视频（跳过下载）；与 `-bvid` 二选一 |
 | `-digest-bin` | `$VIDEO_DIGEST_BIN`→PATH | `video-digest` 二进制路径 |
 | `-summarizer` | `$BILI_SUMMARIZER_URL`→`http://127.0.0.1:8091` | 摘要服务地址 |
+| `-summarizer-token` | `$BILI_SUMMARIZER_TOKEN` | 摘要服务 token（服务端设 `SUMMARIZER_TOKEN` 时必填） |
 | `-lang` / `-keywords` | `zh-CN` / `unspoken` | 转写 locale / 画面关键字模式（`unspoken`\|`all`） |
 | `-digest-out` / `-top` | `<stem>.digest/` / `25` | 产物目录 / 摘要取前 N 关键字 |
 | `-keep-video` | 关 | 保留下载的视频（默认下载到临时文件并删除） |
