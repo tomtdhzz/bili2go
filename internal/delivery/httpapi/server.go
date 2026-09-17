@@ -38,6 +38,7 @@ type Config struct {
 	ShutdownGrace   time.Duration
 	CacheDir        string
 	CacheMaxBytes   int64
+	ArtifactDir     string // 非空时 /api/analyze 把 mp4+产物按 bvid 存此目录（否则临时+删）
 }
 
 // DefaultConfig 单实例默认：4 并发、5s 排队、30m 单次超时、30s 关闭排空。
@@ -211,17 +212,20 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) SetAnalyzer(a *analyze.Analyzer) { s.analyzer = a }
 
 type analyzeResp struct {
-	Markdown string  `json:"markdown"`
-	Model    string  `json:"model"`
-	Fallback bool    `json:"fallback"`
-	Reason   string  `json:"reason,omitempty"`
-	Title    string  `json:"title"`
-	Page     int     `json:"page"`
-	Quality  int     `json:"quality"`
-	Codec    string  `json:"codec"`
-	Engine   string  `json:"engine"`
-	Segments int     `json:"segments"`
-	Duration float64 `json:"duration_s"`
+	Markdown    string  `json:"markdown"`
+	Model       string  `json:"model"`
+	Fallback    bool    `json:"fallback"`
+	Reason      string  `json:"reason,omitempty"`
+	Title       string  `json:"title"`
+	Page        int     `json:"page"`
+	Quality     int     `json:"quality"`
+	Codec       string  `json:"codec"`
+	Engine      string  `json:"engine"`
+	Segments    int     `json:"segments"`
+	Duration    float64 `json:"duration_s"`
+	VideoPath   string  `json:"video_path,omitempty"`
+	SummaryPath string  `json:"summary_path,omitempty"`
+	DigestPath  string  `json:"digest_path,omitempty"`
 }
 
 // handleAnalyze 下载 → digest → 摘要，返回五节 summary 的 JSON。重操作，走限流。
@@ -261,14 +265,36 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 	}
 
-	tmp, err := os.CreateTemp("", "bili2go-az-*.mp4")
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, -1, err.Error())
-		return
+	var videoPath, outDir string
+	if s.cfg.ArtifactDir != "" {
+		key := sanitizeFilename(bvid)
+		if key == "" {
+			key = "video"
+		}
+		if page > 0 {
+			key = fmt.Sprintf("%s-p%d", key, page)
+		}
+		outDir = filepath.Join(s.cfg.ArtifactDir, key)
+		if err := os.MkdirAll(outDir, 0o755); err != nil {
+			writeErr(w, http.StatusInternalServerError, -1, err.Error())
+			return
+		}
+		videoPath = filepath.Join(outDir, "video.mp4")
+	} else {
+		tmp, terr := os.CreateTemp("", "bili2go-az-*.mp4")
+		if terr != nil {
+			writeErr(w, http.StatusInternalServerError, -1, terr.Error())
+			return
+		}
+		videoPath = tmp.Name()
+		tmp.Close()
+		defer os.Remove(videoPath)
+		if outDir, terr = os.MkdirTemp("", "bili2go-digest-*"); terr != nil {
+			writeErr(w, http.StatusInternalServerError, -1, terr.Error())
+			return
+		}
+		defer os.RemoveAll(outDir)
 	}
-	videoPath := tmp.Name()
-	tmp.Close()
-	defer os.Remove(videoPath)
 
 	res, err := s.dl.Download(ctx, app.Request{
 		BVID: bvid, Page: page, QN: qn,
@@ -279,19 +305,12 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	outDir, err := os.MkdirTemp("", "bili2go-digest-*")
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, -1, err.Error())
-		return
-	}
-	defer os.RemoveAll(outDir)
-
 	report, err := s.analyzer.Analyze(ctx, videoPath, outDir)
 	if err != nil {
 		analyzeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, analyzeResp{
+	resp := analyzeResp{
 		Markdown: report.Summary.Markdown,
 		Model:    report.Summary.Model,
 		Fallback: report.Summary.Fallback,
@@ -303,7 +322,13 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		Engine:   report.Digest.Meta.Engine,
 		Segments: report.Digest.Meta.Segments,
 		Duration: report.Digest.Meta.DurationS,
-	})
+	}
+	if s.cfg.ArtifactDir != "" {
+		resp.VideoPath = videoPath
+		resp.SummaryPath = report.SummaryPath
+		resp.DigestPath = report.Digest.DigestPath
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // analyzeErr 把下载/分析错误映射为 HTTP；客户端断开/超时不回响应。

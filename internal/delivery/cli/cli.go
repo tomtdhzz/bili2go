@@ -172,6 +172,7 @@ func cmdServe(args []string) int {
 	fs.DurationVar(&cfg.ShutdownGrace, "shutdown-grace", cfg.ShutdownGrace, "优雅关闭排空上限")
 	fs.StringVar(&cfg.CacheDir, "cache-dir", cfg.CacheDir, "缓存目录")
 	fs.Int64Var(&cfg.CacheMaxBytes, "cache-size", cfg.CacheMaxBytes, "缓存总字节上限（0=禁用缓存与去重）")
+	fs.StringVar(&cfg.ArtifactDir, "artifact-dir", "", "非空时 /api/analyze 把 mp4+summary.md 按 bvid 存此目录并回传路径（默认临时+删）")
 	summarizerURL := fs.String("summarizer", "", "摘要服务地址（默认 env BILI_SUMMARIZER_URL，否则 http://127.0.0.1:8091）")
 	summarizerTok := fs.String("summarizer-token", "", "摘要服务 token（默认 env BILI_SUMMARIZER_TOKEN）")
 	whisperBin := fs.String("whisper-bin", "", "whisper.cpp CLI（默认 whisper-cli）")

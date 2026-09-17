@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"bili2go/internal/analyze"
+	"bili2go/internal/app"
 )
 
 type fakeDigester struct{}
@@ -67,5 +70,36 @@ func TestAnalyzeNotConfigured(t *testing.T) {
 	testServer().Handler().ServeHTTP(rr, req) // 无 SetAnalyzer
 	if rr.Code != http.StatusNotImplemented {
 		t.Errorf("status = %d, want 501", rr.Code)
+	}
+}
+
+func TestAnalyzePersistsArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	dl := app.NewDownloader(fakeMeta{}, fakeStreams{}, fakeFetcher{}, fakeMuxer{}, nil)
+	cfg := DefaultConfig()
+	cfg.CacheMaxBytes = 0
+	cfg.ArtifactDir = dir
+	s := New(dl, cfg)
+	s.SetAnalyzer(analyze.NewAnalyzer(fakeDigester{}, fakeSummarizer{}))
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/analyze?bvid=BV1", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	var resp analyzeResp
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.VideoPath == "" || resp.SummaryPath == "" {
+		t.Fatalf("expected persisted paths, got %+v", resp)
+	}
+	if !strings.HasPrefix(resp.VideoPath, dir) {
+		t.Errorf("video_path %q not under artifact dir %q", resp.VideoPath, dir)
+	}
+	for _, p := range []string{resp.VideoPath, resp.SummaryPath} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("artifact missing on disk: %s (%v)", p, err)
+		}
 	}
 }

@@ -65,6 +65,9 @@ this project uses date-based entries (no semantic version tags yet).
     `screen_keywords` empty (summarizer degrades gracefully); OCR keywords are phase 2.
   - `serve` gains `-whisper-bin`/`-whisper-model`/`-lang`/`-summarizer`/`-summarizer-token`,
     and `-digest-bin` to opt back into macOS `video-digest`.
+  - `serve -artifact-dir DIR` optionally persists each request's `video.mp4` + `summary.md` +
+    `digest.json` under `DIR/<bvid>[-p<page>]/` and returns `video_path`/`summary_path`/`digest_path`;
+    default stays stateless (temp files, deleted after the request).
   - `deploy/bili2go/Dockerfile` (debian-slim + ffmpeg + statically-built `whisper-cli`) +
     `docker-compose.yml` `bili2go` service; whisper model mounted via `./models`. Runs on
     Linux — no macOS dependency. Design: `docs/prd/PRD-self-hosted-analyze.md`,
