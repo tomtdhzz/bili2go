@@ -99,7 +99,7 @@ curl -X POST 'http://127.0.0.1:8090/api/analyze?bvid={BVID}'
 |---|---|---|
 | `GET /api/info` | `bvid`(必), `page`, `qn` | 返回清晰度与信息 JSON |
 | `GET /download` | `bvid`(必), `qn`, `page`, `codec` | 回传合并后的 mp4（响应头含 `X-Bili-Quality`/`X-Bili-Codec`） |
-| `POST /api/analyze` | `bvid`(必), `page`, `qn`, `codec` | 下载→转写→摘要，返回五节 `summary.md` 的 JSON；重操作走限流（饱和 `429`）。需 `whisper.cpp`（`WHISPER_MODEL`）+ 摘要服务（`cmd/summarizer` 或 docker）。未装 whisper 时可用 `-digest-bin` 走 macOS `video-digest` |
+| `POST /api/analyze` | `bvid`(必), `page`, `qn`, `codec` | 下载→转写→**画面 OCR**→摘要，返回五节 `summary.md` 的 JSON；重操作走限流（饱和 `429`）。转写需 `whisper.cpp`（`WHISPER_MODEL`）、画面关键字需 `tesseract`（缺则该项留空），加摘要服务（`cmd/summarizer` 或 docker）。serve `-keywords none\|unspoken\|all` 控 OCR；`-digest-bin` 可切 macOS `video-digest` |
 
 错误返回非 2xx + `{"code":<int>,"message":"<str>"}`。
 

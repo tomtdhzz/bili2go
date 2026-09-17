@@ -23,8 +23,11 @@ RUN cmake -S /w -B /w/build -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
       -DGGML_CPU_ARM_ARCH=armv8.2-a+fp16 \
  && cmake --build /w/build -j --target whisper-cli
 FROM debian:bookworm-slim
+# ffmpeg（音视频/抽帧）+ whisper 运行时（libgomp）+ tesseract（画面 OCR，中英语言包）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg libgomp1 ca-certificates && rm -rf /var/lib/apt/lists/*
+      ffmpeg libgomp1 ca-certificates \
+      tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim \
+      && rm -rf /var/lib/apt/lists/*
 COPY --from=gobuild /out/bili2go /usr/local/bin/bili2go
 COPY --from=whisper /w/build/bin/whisper-cli /usr/local/bin/whisper-cli
 ENV WHISPER_MODEL=/models/ggml-small.bin \

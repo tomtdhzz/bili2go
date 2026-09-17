@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 关联 PRD | `docs/prd/PRD-self-hosted-analyze.md` |
-| 状态 | 阶段 1（转写）已实现，本地端到端验证通过；OCR 阶段 2 |
+| 状态 | 阶段 1（转写）+ 阶段 2（画面 OCR）已实现，本地端到端验证通过 |
 | 日期 | 2026-09-17 |
 | builds_on | 迭代 4（analyze 链路）、5（鉴权）、6（Go summarizer） |
 

@@ -1,7 +1,7 @@
 # bili2go — 自托管分析服务需求规格
 
 > spec-driven「Requirements + Acceptance scenarios + 冻结契约」层。对应 requirement-orchestrator 迭代 7。
-> 状态：阶段 1（转写）已实现，本地端到端验证通过；OCR 为阶段 2。日期：2026-09-17。builds_on：迭代 4（analyze 链路）、5（鉴权）、6（Go summarizer）。
+> 状态：阶段 1（转写）+ 阶段 2（画面 OCR）已实现，本地端到端验证通过。日期：2026-09-17。builds_on：迭代 4（analyze 链路）、5（鉴权）、6（Go summarizer）。
 
 ## 1. 背景与目标
 
@@ -18,7 +18,10 @@
 **分阶段**（降低一次性风险）：
 - **阶段 1（本迭代核心）**：whisper 转写 + HTTP `/api/analyze` 端点 + Docker 部署。`screen_keywords` 暂为空
   （摘要服务对空关键字已优雅降级）。交付「POST bvid → 口述内容总结」的可部署闭环。
-- **阶段 2**：`tesseract` OCR 抽画面未口述关键字，填满第 ③④ 节。
+- **阶段 2（画面 OCR，本次补上）**：**要解决的问题**——whisper 只捕获「口述」，但视频里大量关键信息**只在画面上、
+  没被念出来**（幻灯片的数字/图表/标题/产品名，如「履约时效 P95=4.2h」「预算 240万」「退款率 1.7%」）；纯转写
+  摘要会**漏掉**这些 on-screen-only 信息，第 ③④ 节空缺。用 `tesseract` OCR 抽帧识别画面文字，挑出**未口述**部分
+  填入 `screen_keywords`，让摘要覆盖画面独有事实，并支持「口述+画面双重印证」。
 
 ## 2. 需求（结果导向，可观测可测）
 
@@ -33,6 +36,10 @@
   `summarizer`——单机可用，宿主 `POST /api/analyze` 跑通完整链路（Linux 容器，无 macOS 依赖）。
 - **RS5 优雅降级与治理**：无音轨/whisper 失败 → `transcript.engine="none"`，摘要仍产出（②④写「无口述」），不 500；
   `/api/analyze` 为重操作，走既有 WS-A 限流（饱和 429）与客户端取消/超时。
+- **RS6 画面未口述关键字（阶段 2）**：`LocalDigester` 抽帧 + `tesseract` OCR 产出 `screen_keywords[]`
+  （`term`/`first_t_s`/`occurrences`/`score`/`evidence_frames`），并判定 `spoken_in_transcript`（画面文字是否也被
+  口述，供第④节双重印证）与 `is_chrome`（跨大量帧常驻的界面装饰/水印 → 排除出结论）；`unspoken` 模式只留未口述项。
+  `tesseract` 不可用或单帧失败时优雅跳过（`screen_keywords=[]`，退回阶段 1 行为）。质量为 tesseract 级。
 
 ### 非目标
 
