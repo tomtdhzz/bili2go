@@ -103,6 +103,14 @@ curl -X POST 'http://127.0.0.1:8090/api/analyze?bvid={BVID}'
 
 错误返回非 2xx + `{"code":<int>,"message":"<str>"}`。
 
+**产物落盘说明**：`POST /api/analyze` 是无状态的——下载的视频与 digest 产物写入系统临时目录
+（`$TMPDIR/bili2go-az-*.mp4`、`$TMPDIR/bili2go-digest-*/`），**请求结束即删除**，响应只回 JSON，
+磁盘不留文件。要保留：
+
+- 只要视频 → `GET /download`（把 mp4 回传给客户端）。
+- 要视频 + `summary.md`/`digest.json` 落盘 → 用 CLI 而非 HTTP：
+  `analyze -bvid {BVID} -o video.mp4 -keep-video -digest-out out/`（产物写入 `out/`，视频保留在 `-o` 路径）。
+
 ### 清晰度与登录态（SESSDATA）
 
 清晰度码（qn）：`16=360P 32=480P 64=720P 80=1080P 112=1080P+ 120=4K …`
