@@ -29,6 +29,7 @@ type LocalDigester struct {
 	Keywords     string // none|unspoken|all，默认 "unspoken"（none=跳过 OCR）
 	OCRLang      string // tesseract 语言，默认 "chi_sim+eng"
 	MaxFrames    int    // OCR 抽帧上限，默认 60
+	DedupHamming int    // 近重复帧去重阈值：aHash 汉明距离<此值则跳过 OCR；默认 6，<0=关闭
 }
 
 // NewLocalDigester 用默认参数构造；空字段回落到默认二进制名与 env。
@@ -60,6 +61,9 @@ func NewLocalDigester(whisperBin, model, lang string) *LocalDigester {
 	}
 	if d.MaxFrames == 0 {
 		d.MaxFrames = 60
+	}
+	if d.DedupHamming == 0 {
+		d.DedupHamming = 6
 	}
 	return d
 }

@@ -69,7 +69,20 @@ func (d *LocalDigester) ocr(ctx context.Context, videoPath, outDir string, dur f
 	}
 
 	frames := make([]frameOCR, 0, len(files))
+	var lastHash uint64
+	haveLast := false
+	skipped := 0
 	for i, f := range files {
+		// 静态画面（幻灯片停留多帧）→ 与上一保留帧近乎相同就跳过 OCR，省算力与关键字冗余。
+		if d.DedupHamming > 0 {
+			if h, herr := frameAHash(f); herr == nil {
+				if haveLast && hamming(h, lastHash) < d.DedupHamming {
+					skipped++
+					continue
+				}
+				lastHash, haveLast = h, true
+			}
+		}
 		out, err := output(ctx, d.TesseractBin, f, "stdout", "-l", d.OCRLang)
 		if err != nil {
 			continue // 单帧 OCR 失败不致命
@@ -79,6 +92,9 @@ func (d *LocalDigester) ocr(ctx context.Context, videoPath, outDir string, dur f
 			TS:    float64(i) * interval,
 			Lines: strings.Split(string(out), "\n"),
 		})
+	}
+	if skipped > 0 {
+		fmt.Fprintf(os.Stderr, "localdigest: OCR 去重跳过 %d/%d 静态帧\n", skipped, len(files))
 	}
 	mode := d.Keywords
 	if mode == "" {

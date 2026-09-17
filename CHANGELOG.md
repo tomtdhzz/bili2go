@@ -65,6 +65,9 @@ this project uses date-based entries (no semantic version tags yet).
     ffmpeg and OCRs them with `tesseract` to fill `screen_keywords` (on-screen text not spoken),
     flagging `spoken_in_transcript` (dual evidence) and `is_chrome` (persistent UI/watermark,
     excluded); OCR gracefully skips to empty when tesseract is unavailable.
+  - OCR frame dedup: near-identical consecutive frames (static slides) are skipped via an 8×8
+    average-hash / Hamming-distance test before tesseract, cutting redundant OCR work and
+    keyword noise on long or slide-heavy videos (`serve`-level `MaxFrames` cap still applies).
   - `serve` gains `-whisper-bin`/`-whisper-model`/`-lang`/`-keywords`/`-tesseract-bin`/`-summarizer`/
     `-summarizer-token`, and `-digest-bin` to opt back into macOS `video-digest`.
   - `serve -artifact-dir DIR` optionally persists each request's `video.mp4` + `summary.md` +
