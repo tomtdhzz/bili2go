@@ -67,7 +67,8 @@ this project uses date-based entries (no semantic version tags yet).
     and `-digest-bin` to opt back into macOS `video-digest`.
   - `serve -artifact-dir DIR` optionally persists each request's `video.mp4` + `summary.md` +
     `digest.json` under `DIR/<bvid>[-p<page>]/` and returns `video_path`/`summary_path`/`digest_path`;
-    default stays stateless (temp files, deleted after the request).
+    a repeat request for the same `bvid`(+`page`) is served from those artifacts (`"cached":true`) with
+    no re-download/transcribe and no limiter slot. Default stays stateless (temp files, deleted).
   - `deploy/bili2go/Dockerfile` (debian-slim + ffmpeg + statically-built `whisper-cli`) +
     `docker-compose.yml` `bili2go` service; whisper model mounted via `./models`. Runs on
     Linux — no macOS dependency. Design: `docs/prd/PRD-self-hosted-analyze.md`,

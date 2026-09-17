@@ -109,6 +109,7 @@ curl -X POST 'http://127.0.0.1:8090/api/analyze?bvid={BVID}'
 - **服务端留存（推荐）** → 起 serve 时带 `-artifact-dir DIR`：每次请求把 `video.mp4` + `summary.md` + `digest.json`
   存到 `DIR/<bvid>[-p<page>]/`，响应额外回传 `video_path`/`summary_path`/`digest_path`。
   例：`bili2go serve -artifact-dir ~/bili2go-out -whisper-model ~/ggml-small.bin`。
+  **复用**：同一 `bvid`（+`page`）二次请求命中已存产物直接返回（`"cached":true`），不再下载/转写、不占限流槽。
 - 只要视频 → `GET /download`（把 mp4 回传给客户端）。
 - 用 CLI 而非 HTTP → `analyze -bvid {BVID} -o video.mp4 -keep-video -digest-out out/`。
 

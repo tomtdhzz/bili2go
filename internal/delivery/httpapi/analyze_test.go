@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"bili2go/internal/analyze"
@@ -101,5 +102,56 @@ func TestAnalyzePersistsArtifacts(t *testing.T) {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("artifact missing on disk: %s (%v)", p, err)
 		}
+	}
+}
+
+type countingDigester struct{ n *int32 }
+
+func (c countingDigester) Digest(ctx context.Context, videoPath, outDir string) (analyze.DigestOutput, error) {
+	atomic.AddInt32(c.n, 1)
+	return analyze.DigestOutput{
+		Dir:  outDir,
+		JSON: []byte(`{"source":{},"transcript":{},"screen_keywords":[],"gaps":[]}`),
+		Meta: analyze.DigestMeta{Engine: "whisper", Segments: 1},
+	}, nil
+}
+
+// TestAnalyzeReusesArtifacts：-artifact-dir 下同一 bvid 二次请求命中 result.json，不再 digest。
+func TestAnalyzeReusesArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	var digestCalls int32
+	dl := app.NewDownloader(fakeMeta{}, fakeStreams{}, fakeFetcher{}, fakeMuxer{}, nil)
+	cfg := DefaultConfig()
+	cfg.CacheMaxBytes = 0
+	cfg.ArtifactDir = dir
+	s := New(dl, cfg)
+	s.SetAnalyzer(analyze.NewAnalyzer(countingDigester{&digestCalls}, fakeSummarizer{}))
+
+	do := func() analyzeResp {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/analyze?bvid=BVX", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
+		}
+		var resp analyzeResp
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	first := do()
+	if first.Cached {
+		t.Errorf("first request should not be cached")
+	}
+	second := do()
+	if !second.Cached {
+		t.Errorf("second request should be served from artifacts (cached=true)")
+	}
+	if got := atomic.LoadInt32(&digestCalls); got != 1 {
+		t.Errorf("digest calls = %d, want 1 (2nd request must reuse)", got)
+	}
+	if second.Markdown != first.Markdown {
+		t.Errorf("cached markdown differs from original")
 	}
 }

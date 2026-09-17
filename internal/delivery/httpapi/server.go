@@ -226,6 +226,7 @@ type analyzeResp struct {
 	VideoPath   string  `json:"video_path,omitempty"`
 	SummaryPath string  `json:"summary_path,omitempty"`
 	DigestPath  string  `json:"digest_path,omitempty"`
+	Cached      bool    `json:"cached,omitempty"`
 }
 
 // handleAnalyze 下载 → digest → 摘要，返回五节 summary 的 JSON。重操作，走限流。
@@ -248,6 +249,27 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 服务端留存目录（若配置）：命中已存 result.json 直接复用，不下载/转写/占限流槽。
+	var artifactDir string
+	if s.cfg.ArtifactDir != "" {
+		key := sanitizeFilename(bvid)
+		if key == "" {
+			key = "video"
+		}
+		if page > 0 {
+			key = fmt.Sprintf("%s-p%d", key, page)
+		}
+		artifactDir = filepath.Join(s.cfg.ArtifactDir, key)
+		if data, rerr := os.ReadFile(filepath.Join(artifactDir, "result.json")); rerr == nil {
+			var cached analyzeResp
+			if json.Unmarshal(data, &cached) == nil && cached.Markdown != "" {
+				cached.Cached = true
+				writeJSON(w, http.StatusOK, cached)
+				return
+			}
+		}
+	}
+
 	release, err := s.limiter.Acquire(r.Context())
 	if err != nil {
 		if errors.Is(err, ErrBusy) {
@@ -266,15 +288,8 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var videoPath, outDir string
-	if s.cfg.ArtifactDir != "" {
-		key := sanitizeFilename(bvid)
-		if key == "" {
-			key = "video"
-		}
-		if page > 0 {
-			key = fmt.Sprintf("%s-p%d", key, page)
-		}
-		outDir = filepath.Join(s.cfg.ArtifactDir, key)
+	if artifactDir != "" {
+		outDir = artifactDir
 		if err := os.MkdirAll(outDir, 0o755); err != nil {
 			writeErr(w, http.StatusInternalServerError, -1, err.Error())
 			return
@@ -323,10 +338,13 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		Segments: report.Digest.Meta.Segments,
 		Duration: report.Digest.Meta.DurationS,
 	}
-	if s.cfg.ArtifactDir != "" {
+	if artifactDir != "" {
 		resp.VideoPath = videoPath
 		resp.SummaryPath = report.SummaryPath
 		resp.DigestPath = report.Digest.DigestPath
+		if data, merr := json.Marshal(resp); merr == nil {
+			_ = os.WriteFile(filepath.Join(artifactDir, "result.json"), data, 0o644)
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
