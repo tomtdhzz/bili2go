@@ -17,6 +17,7 @@ import (
 	"bili2go/internal/bilibili"
 	"bili2go/internal/delivery/httpapi"
 	"bili2go/internal/domain"
+	"bili2go/internal/jobstore"
 	"bili2go/internal/media"
 )
 
@@ -181,6 +182,8 @@ func cmdServe(args []string) int {
 	lang := fs.String("lang", "zh", "转写语言")
 	keywords := fs.String("keywords", "unspoken", "画面 OCR 关键字 none|unspoken|all（none=跳过 OCR）")
 	tesseractBin := fs.String("tesseract-bin", "", "tesseract CLI（默认 tesseract；OCR 用）")
+	jobsDir := fs.String("jobs-dir", "", "非空时启用异步任务：POST /api/jobs 建任务，产物+状态存此目录（含结果，可当知识库）")
+	jobWorkers := fs.Int("job-workers", 2, "异步任务 worker 数")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -208,6 +211,13 @@ func cmdServe(args []string) int {
 		sumTok = os.Getenv("BILI_SUMMARIZER_TOKEN")
 	}
 	srv.SetAnalyzer(analyze.NewAnalyzer(digester, analyze.NewHTTPSummarizer(sumURL, 25, sumTok)))
+	if *jobsDir != "" {
+		if store, jerr := jobstore.NewDiskStore(*jobsDir); jerr != nil {
+			fmt.Fprintln(os.Stderr, "jobs disabled:", jerr)
+		} else {
+			srv.SetJobStore(store, *jobWorkers)
+		}
+	}
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),
@@ -218,6 +228,7 @@ func cmdServe(args []string) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	srv.StartJobWorkers(ctx)
 
 	errCh := make(chan error, 1)
 	go func() {

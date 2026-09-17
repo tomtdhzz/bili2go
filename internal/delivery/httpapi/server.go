@@ -18,6 +18,7 @@ import (
 	"bili2go/internal/bilibili"
 	"bili2go/internal/cache"
 	"bili2go/internal/domain"
+	"bili2go/internal/jobstore"
 )
 
 // Server 是 HTTP 交付层，依赖应用层 Downloader 用例。
@@ -28,6 +29,9 @@ type Server struct {
 	cache      *cache.Cache
 	cfg        Config
 	retryAfter int
+	jobs       jobstore.Store
+	jobCh      chan string
+	jobWorkers int
 }
 
 // Config 交付层过载保护与超时配置（tech-design §7.8）。
@@ -81,6 +85,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/info", s.handleInfo)
 	mux.HandleFunc("/download", s.handleDownload)
 	mux.HandleFunc("/api/analyze", s.handleAnalyze)
+	mux.HandleFunc("/api/jobs", s.handleJobs)
+	mux.HandleFunc("/api/jobs/", s.handleJobByID)
 	return mux
 }
 
@@ -229,101 +235,93 @@ type analyzeResp struct {
 	Cached      bool    `json:"cached,omitempty"`
 }
 
-// handleAnalyze 下载 → digest → 摘要，返回五节 summary 的 JSON。重操作，走限流。
-func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
-	if s.analyzer == nil {
-		writeErr(w, http.StatusNotImplemented, -1, "analyze not configured")
-		return
-	}
+type analyzeParamsT struct {
+	bvid     string
+	page, qn int
+	prefer   domain.Codec
+}
+
+// parseAnalyzeParams 解析 /api/analyze 与 /api/jobs 的公共参数；错误返回非空消息。
+func parseAnalyzeParams(r *http.Request) (analyzeParamsT, string) {
 	q := r.URL.Query()
 	bvid := q.Get("bvid")
 	if bvid == "" {
-		writeErr(w, http.StatusBadRequest, -1, "missing bvid")
-		return
+		return analyzeParamsT{}, "missing bvid"
 	}
-	page := atoiDefault(q.Get("page"), 0)
-	qn := atoiDefault(q.Get("qn"), 0)
 	prefer, ok := domain.ParseCodec(q.Get("codec"))
 	if !ok {
-		writeErr(w, http.StatusBadRequest, -1, "invalid codec")
-		return
+		return analyzeParamsT{}, "invalid codec"
 	}
+	return analyzeParamsT{bvid: bvid, page: atoiDefault(q.Get("page"), 0), qn: atoiDefault(q.Get("qn"), 0), prefer: prefer}, ""
+}
 
-	// 服务端留存目录（若配置）：命中已存 result.json 直接复用，不下载/转写/占限流槽。
-	var artifactDir string
-	if s.cfg.ArtifactDir != "" {
-		key := sanitizeFilename(bvid)
-		if key == "" {
-			key = "video"
-		}
-		if page > 0 {
-			key = fmt.Sprintf("%s-p%d", key, page)
-		}
-		artifactDir = filepath.Join(s.cfg.ArtifactDir, key)
-		if data, rerr := os.ReadFile(filepath.Join(artifactDir, "result.json")); rerr == nil {
-			var cached analyzeResp
-			if json.Unmarshal(data, &cached) == nil && cached.Markdown != "" {
-				cached.Cached = true
-				writeJSON(w, http.StatusOK, cached)
-				return
-			}
-		}
+// artifactDirFor 返回某 bvid(+page) 的留存目录（未配置 ArtifactDir 时为空）。
+func (s *Server) artifactDirFor(bvid string, page int) string {
+	if s.cfg.ArtifactDir == "" {
+		return ""
 	}
+	key := sanitizeFilename(bvid)
+	if key == "" {
+		key = "video"
+	}
+	if page > 0 {
+		key = fmt.Sprintf("%s-p%d", key, page)
+	}
+	return filepath.Join(s.cfg.ArtifactDir, key)
+}
 
-	release, err := s.limiter.Acquire(r.Context())
+// cachedAnalyze 命中留存的 result.json 则直接复用（Cached=true）。
+func (s *Server) cachedAnalyze(bvid string, page int) (analyzeResp, bool) {
+	dir := s.artifactDirFor(bvid, page)
+	if dir == "" {
+		return analyzeResp{}, false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "result.json"))
 	if err != nil {
-		if errors.Is(err, ErrBusy) {
-			w.Header().Set("Retry-After", strconv.Itoa(s.retryAfter))
-			writeErr(w, http.StatusTooManyRequests, -429, "server busy")
-		}
-		return // 客户端断开：无需响应
+		return analyzeResp{}, false
 	}
-	defer release()
-
-	ctx := r.Context()
-	if s.cfg.DownloadTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DownloadTimeout)
-		defer cancel()
+	var cached analyzeResp
+	if json.Unmarshal(data, &cached) != nil || cached.Markdown == "" {
+		return analyzeResp{}, false
 	}
+	cached.Cached = true
+	return cached, true
+}
 
+// produceAnalyze 执行下载→digest→摘要→（留存）产出分析响应。不含限流（同步 handler 与 job worker 共用）。
+func (s *Server) produceAnalyze(ctx context.Context, p analyzeParamsT) (analyzeResp, error) {
+	artifactDir := s.artifactDirFor(p.bvid, p.page)
 	var videoPath, outDir string
 	if artifactDir != "" {
 		outDir = artifactDir
 		if err := os.MkdirAll(outDir, 0o755); err != nil {
-			writeErr(w, http.StatusInternalServerError, -1, err.Error())
-			return
+			return analyzeResp{}, err
 		}
 		videoPath = filepath.Join(outDir, "video.mp4")
 	} else {
-		tmp, terr := os.CreateTemp("", "bili2go-az-*.mp4")
-		if terr != nil {
-			writeErr(w, http.StatusInternalServerError, -1, terr.Error())
-			return
+		tmp, err := os.CreateTemp("", "bili2go-az-*.mp4")
+		if err != nil {
+			return analyzeResp{}, err
 		}
 		videoPath = tmp.Name()
 		tmp.Close()
 		defer os.Remove(videoPath)
-		if outDir, terr = os.MkdirTemp("", "bili2go-digest-*"); terr != nil {
-			writeErr(w, http.StatusInternalServerError, -1, terr.Error())
-			return
+		if outDir, err = os.MkdirTemp("", "bili2go-digest-*"); err != nil {
+			return analyzeResp{}, err
 		}
 		defer os.RemoveAll(outDir)
 	}
 
 	res, err := s.dl.Download(ctx, app.Request{
-		BVID: bvid, Page: page, QN: qn,
-		PreferCodec: prefer, FallbackCodec: domain.CodecAVC,
+		BVID: p.bvid, Page: p.page, QN: p.qn,
+		PreferCodec: p.prefer, FallbackCodec: domain.CodecAVC,
 	}, videoPath)
 	if err != nil {
-		analyzeErr(w, err)
-		return
+		return analyzeResp{}, err
 	}
-
 	report, err := s.analyzer.Analyze(ctx, videoPath, outDir)
 	if err != nil {
-		analyzeErr(w, err)
-		return
+		return analyzeResp{}, err
 	}
 	resp := analyzeResp{
 		Markdown: report.Summary.Markdown,
@@ -331,7 +329,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		Fallback: report.Summary.Fallback,
 		Reason:   report.Summary.Reason,
 		Title:    res.Title,
-		Page:     page,
+		Page:     p.page,
 		Quality:  res.ChosenQuality.QN,
 		Codec:    res.Codec.String(),
 		Engine:   report.Digest.Meta.Engine,
@@ -345,6 +343,45 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		if data, merr := json.Marshal(resp); merr == nil {
 			_ = os.WriteFile(filepath.Join(artifactDir, "result.json"), data, 0o644)
 		}
+	}
+	return resp, nil
+}
+
+// handleAnalyze 同步：下载 → digest → 摘要，返回五节 summary 的 JSON。重操作，走限流。
+func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
+	if s.analyzer == nil {
+		writeErr(w, http.StatusNotImplemented, -1, "analyze not configured")
+		return
+	}
+	p, emsg := parseAnalyzeParams(r)
+	if emsg != "" {
+		writeErr(w, http.StatusBadRequest, -1, emsg)
+		return
+	}
+	if cached, ok := s.cachedAnalyze(p.bvid, p.page); ok {
+		writeJSON(w, http.StatusOK, cached) // 命中留存，不占限流槽
+		return
+	}
+	release, err := s.limiter.Acquire(r.Context())
+	if err != nil {
+		if errors.Is(err, ErrBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(s.retryAfter))
+			writeErr(w, http.StatusTooManyRequests, -429, "server busy")
+		}
+		return
+	}
+	defer release()
+
+	ctx := r.Context()
+	if s.cfg.DownloadTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DownloadTimeout)
+		defer cancel()
+	}
+	resp, err := s.produceAnalyze(ctx, p)
+	if err != nil {
+		analyzeErr(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -78,6 +78,14 @@ this project uses date-based entries (no semantic version tags yet).
     `docker-compose.yml` `bili2go` service; whisper model mounted via `./models`. Runs on
     Linux — no macOS dependency. Design: `docs/prd/PRD-self-hosted-analyze.md`,
     `docs/tech-design/tech-design-self-hosted-analyze.md`.
+- Async analysis jobs + searchable knowledge base (`internal/jobstore`): with `serve -jobs-dir DIR`,
+  `POST /api/jobs?bvid=<BV>[&page&qn&codec]` enqueues an analysis and returns `202 {id,status}`;
+  a bounded worker pool runs it (reusing the same download→digest→summarize pipeline) and persists
+  status + full result. `GET /api/jobs/{id}` polls status/result; `GET /api/jobs[?limit=&q=]` lists
+  recent analyses and full-text-searches stored summaries — the accumulated summaries form a
+  browsable/searchable knowledge base. Disk-backed JSON store (survives restart; queued/running jobs
+  re-enqueued on start) behind a `Store` interface (SQLite/Postgres can drop in later). `-job-workers`
+  sets pool size.
 
 ### Fixed
 - `internal/media` ffmpeg muxer now passes explicit `-f mp4`, so muxing no longer depends on the output filename's extension (cache temp files are not `.mp4`).
