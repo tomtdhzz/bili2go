@@ -51,7 +51,7 @@ func usage() {
 用法:
   bili2go info  -bvid <BV|url> [-page N]
   bili2go dl    -bvid <BV|url> [-page N] [-qn 80] [-codec avc] -o out.mp4
-  bili2go serve    [-addr :8080]
+  bili2go serve    [-addr :8090]
   bili2go analyze  -bvid <BV|url> [-o out.mp4] | -video <path> [-summarizer URL]
 
 SESSDATA: 环境变量 BILI_SESSDATA 或各子命令的 -sessdata
@@ -163,7 +163,7 @@ func cmdDownload(args []string) int {
 
 func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	addr := fs.String("addr", ":8080", "监听地址")
+	addr := fs.String("addr", ":8090", "监听地址")
 	sd := fs.String("sessdata", "", "SESSDATA（默认取环境变量 BILI_SESSDATA）")
 	cfg := httpapi.DefaultConfig()
 	fs.IntVar(&cfg.MaxConcurrent, "max-concurrent", cfg.MaxConcurrent, "同时进行的下载数上限")
@@ -172,11 +172,34 @@ func cmdServe(args []string) int {
 	fs.DurationVar(&cfg.ShutdownGrace, "shutdown-grace", cfg.ShutdownGrace, "优雅关闭排空上限")
 	fs.StringVar(&cfg.CacheDir, "cache-dir", cfg.CacheDir, "缓存目录")
 	fs.Int64Var(&cfg.CacheMaxBytes, "cache-size", cfg.CacheMaxBytes, "缓存总字节上限（0=禁用缓存与去重）")
+	summarizerURL := fs.String("summarizer", "", "摘要服务地址（默认 env BILI_SUMMARIZER_URL，否则 http://127.0.0.1:8091）")
+	summarizerTok := fs.String("summarizer-token", "", "摘要服务 token（默认 env BILI_SUMMARIZER_TOKEN）")
+	whisperBin := fs.String("whisper-bin", "", "whisper.cpp CLI（默认 whisper-cli）")
+	whisperModel := fs.String("whisper-model", "", "whisper ggml 模型路径（默认 env WHISPER_MODEL）")
+	digestBin := fs.String("digest-bin", "", "改用 macOS video-digest 二进制（默认空=用本地 whisper 适配器）")
+	lang := fs.String("lang", "zh", "转写语言")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
 	srv := httpapi.New(buildDownloader(resolveSessdata(*sd)), cfg)
+
+	// 分析用例（/api/analyze）：默认本地 whisper 适配器；给 -digest-bin 则用 macOS video-digest。
+	var digester analyze.Digester
+	if *digestBin != "" {
+		digester = analyze.NewExecDigester(*digestBin)
+	} else {
+		digester = analyze.NewLocalDigester(*whisperBin, *whisperModel, *lang)
+	}
+	sumURL := *summarizerURL
+	if sumURL == "" {
+		sumURL = os.Getenv("BILI_SUMMARIZER_URL")
+	}
+	sumTok := *summarizerTok
+	if sumTok == "" {
+		sumTok = os.Getenv("BILI_SUMMARIZER_TOKEN")
+	}
+	srv.SetAnalyzer(analyze.NewAnalyzer(digester, analyze.NewHTTPSummarizer(sumURL, 25, sumTok)))
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),

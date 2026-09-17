@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"bili2go/internal/analyze"
 	"bili2go/internal/app"
 	"bili2go/internal/bilibili"
 	"bili2go/internal/cache"
@@ -22,6 +23,7 @@ import (
 // Server 是 HTTP 交付层，依赖应用层 Downloader 用例。
 type Server struct {
 	dl         *app.Downloader
+	analyzer   *analyze.Analyzer
 	limiter    *Limiter
 	cache      *cache.Cache
 	cfg        Config
@@ -77,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/info", s.handleInfo)
 	mux.HandleFunc("/download", s.handleDownload)
+	mux.HandleFunc("/api/analyze", s.handleAnalyze)
 	return mux
 }
 
@@ -202,6 +205,115 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.serveFile(w, entry, bvid)
+}
+
+// SetAnalyzer 注入分析用例（可空；未注入时 /api/analyze 返回 501）。
+func (s *Server) SetAnalyzer(a *analyze.Analyzer) { s.analyzer = a }
+
+type analyzeResp struct {
+	Markdown string  `json:"markdown"`
+	Model    string  `json:"model"`
+	Fallback bool    `json:"fallback"`
+	Reason   string  `json:"reason,omitempty"`
+	Title    string  `json:"title"`
+	Page     int     `json:"page"`
+	Quality  int     `json:"quality"`
+	Codec    string  `json:"codec"`
+	Engine   string  `json:"engine"`
+	Segments int     `json:"segments"`
+	Duration float64 `json:"duration_s"`
+}
+
+// handleAnalyze 下载 → digest → 摘要，返回五节 summary 的 JSON。重操作，走限流。
+func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
+	if s.analyzer == nil {
+		writeErr(w, http.StatusNotImplemented, -1, "analyze not configured")
+		return
+	}
+	q := r.URL.Query()
+	bvid := q.Get("bvid")
+	if bvid == "" {
+		writeErr(w, http.StatusBadRequest, -1, "missing bvid")
+		return
+	}
+	page := atoiDefault(q.Get("page"), 0)
+	qn := atoiDefault(q.Get("qn"), 0)
+	prefer, ok := domain.ParseCodec(q.Get("codec"))
+	if !ok {
+		writeErr(w, http.StatusBadRequest, -1, "invalid codec")
+		return
+	}
+
+	release, err := s.limiter.Acquire(r.Context())
+	if err != nil {
+		if errors.Is(err, ErrBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(s.retryAfter))
+			writeErr(w, http.StatusTooManyRequests, -429, "server busy")
+		}
+		return // 客户端断开：无需响应
+	}
+	defer release()
+
+	ctx := r.Context()
+	if s.cfg.DownloadTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DownloadTimeout)
+		defer cancel()
+	}
+
+	tmp, err := os.CreateTemp("", "bili2go-az-*.mp4")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, -1, err.Error())
+		return
+	}
+	videoPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(videoPath)
+
+	res, err := s.dl.Download(ctx, app.Request{
+		BVID: bvid, Page: page, QN: qn,
+		PreferCodec: prefer, FallbackCodec: domain.CodecAVC,
+	}, videoPath)
+	if err != nil {
+		analyzeErr(w, err)
+		return
+	}
+
+	outDir, err := os.MkdirTemp("", "bili2go-digest-*")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, -1, err.Error())
+		return
+	}
+	defer os.RemoveAll(outDir)
+
+	report, err := s.analyzer.Analyze(ctx, videoPath, outDir)
+	if err != nil {
+		analyzeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, analyzeResp{
+		Markdown: report.Summary.Markdown,
+		Model:    report.Summary.Model,
+		Fallback: report.Summary.Fallback,
+		Reason:   report.Summary.Reason,
+		Title:    res.Title,
+		Page:     page,
+		Quality:  res.ChosenQuality.QN,
+		Codec:    res.Codec.String(),
+		Engine:   report.Digest.Meta.Engine,
+		Segments: report.Digest.Meta.Segments,
+		Duration: report.Digest.Meta.DurationS,
+	})
+}
+
+// analyzeErr 把下载/分析错误映射为 HTTP；客户端断开/超时不回响应。
+func analyzeErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return
+	default:
+		mapErr(w, err)
+	}
 }
 
 // cacheKey 由请求参数构造缓存键。

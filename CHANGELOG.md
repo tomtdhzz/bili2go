@@ -55,6 +55,20 @@ this project uses date-based entries (no semantic version tags yet).
   auth and offline fallback all unchanged; `internal/analyze` consumer untouched. Docker image is now a
   distroless static binary (~3 MB vs the Python image), health check via `summarizer health` (no shell).
   Design: `docs/prd/PRD-summarizer-go.md`, `docs/tech-design/tech-design-summarizer-go.md`.
+- Self-hosted, request-driven analysis (phase 1 — transcription): `serve` now exposes
+  `POST /api/analyze?bvid=<BV|url>[&page&qn&codec]` → download → digest → summarize →
+  `200 {markdown, model, fallback, title, engine, segments, duration_s, ...}`. Reuses the
+  WS-A limiter (heavy op, saturation → 429); missing bvid → 400; unconfigured → 501.
+  - `internal/analyze` `LocalDigester` — a containerizable `Digester` (parallel to the
+    macOS-only `ExecDigester`) that execs `ffprobe`+`ffmpeg`+`whisper.cpp` to produce a
+    schema-compatible `digest.json` (`transcript.engine="whisper"`). Phase 1 leaves
+    `screen_keywords` empty (summarizer degrades gracefully); OCR keywords are phase 2.
+  - `serve` gains `-whisper-bin`/`-whisper-model`/`-lang`/`-summarizer`/`-summarizer-token`,
+    and `-digest-bin` to opt back into macOS `video-digest`.
+  - `deploy/bili2go/Dockerfile` (debian-slim + ffmpeg + statically-built `whisper-cli`) +
+    `docker-compose.yml` `bili2go` service; whisper model mounted via `./models`. Runs on
+    Linux — no macOS dependency. Design: `docs/prd/PRD-self-hosted-analyze.md`,
+    `docs/tech-design/tech-design-self-hosted-analyze.md`.
 
 ### Fixed
 - `internal/media` ffmpeg muxer now passes explicit `-f mp4`, so muxing no longer depends on the output filename's extension (cache temp files are not `.mp4`).
