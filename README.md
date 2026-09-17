@@ -54,7 +54,7 @@ go run ./cmd/bili2go dl -bvid {BVID} -qn 80 -codec avc -o out.mp4
 go run ./cmd/bili2go dl -bvid {BVID} -page 2 -o p2.mp4
 
 # 启动 HTTP 服务
-go run ./cmd/bili2go serve -addr :8080
+go run ./cmd/bili2go serve -addr :8090
 ```
 
 `-bvid` 接受裸 `BV` 号或完整视频页 URL。占位符 `{BVID}` 仅为示例，请替换为真实值。
@@ -73,27 +73,33 @@ go run ./cmd/bili2go serve -addr :8080
 | `-qn` | info, dl | 可用最高 | **目标清晰度码**（见下方码表）；请求超出可用时自动降级到实际最高。`info` 下用于预览会选中的清晰度 |
 | `-codec` | info, dl | `avc` | **期望视频编码**：`avc`(H.264) / `hevc`(H.265) / `av1`；该清晰度无此编码时按回退选择 |
 | `-o` | **dl** | 必填 | **输出 mp4 文件路径**（仅 `dl`；`info` 不产出文件，传 `-o` 会报错） |
-| `-addr` | serve | `:8080` | HTTP 监听地址（`host:port`） |
+| `-addr` | serve | `:8090` | HTTP 监听地址（`host:port`） |
 | `-sessdata` | 全部 | 环境变量 `BILI_SESSDATA` | 登录 Cookie SESSDATA，决定可下载的清晰度上限 |
 
 ### HTTP API
 
 ```bash
 # 可用清晰度（把 {BVID} 换成真实 BV 号）
-curl 'http://127.0.0.1:8080/api/info?bvid={BVID}'
+curl 'http://127.0.0.1:8090/api/info?bvid={BVID}'
 # → {"bvid":"...","aid":...,"cid":...,"page":1,"title":"...","duration":213,
 #    "current":{"qn":32,"name":"480P","codec":"AVC"},
 #    "qualities":[{"qn":32,"name":"480P"},{"qn":16,"name":"360P"}]}
 #   （示例为匿名，通常仅 ≤480P；配置 SESSDATA 后可出现 720P/1080P）
 
 # 下载（浏览器直接访问即触发下载）；qn/codec 可选
-curl -OJ 'http://127.0.0.1:8080/download?bvid={BVID}&qn=80&codec=avc'
+curl -OJ 'http://127.0.0.1:8090/download?bvid={BVID}&qn=80&codec=avc'
+
+# 自托管分析：下载 → whisper 转写 → 摘要 → 五节 summary.md（需 whisper.cpp + 摘要服务，见下）
+curl -X POST 'http://127.0.0.1:8090/api/analyze?bvid={BVID}'
+# → {"markdown":"## ① 一句话结论\n…（五节）","model":"fallback","fallback":true,
+#    "title":"…","engine":"whisper","segments":42,"duration_s":93}
 ```
 
 | 端点 | 参数 | 说明 |
 |---|---|---|
 | `GET /api/info` | `bvid`(必), `page`, `qn` | 返回清晰度与信息 JSON |
 | `GET /download` | `bvid`(必), `qn`, `page`, `codec` | 回传合并后的 mp4（响应头含 `X-Bili-Quality`/`X-Bili-Codec`） |
+| `POST /api/analyze` | `bvid`(必), `page`, `qn`, `codec` | 下载→转写→摘要，返回五节 `summary.md` 的 JSON；重操作走限流（饱和 `429`）。需 `whisper.cpp`（`WHISPER_MODEL`）+ 摘要服务（`cmd/summarizer` 或 docker）。未装 whisper 时可用 `-digest-bin` 走 macOS `video-digest` |
 
 错误返回非 2xx + `{"code":<int>,"message":"<str>"}`。
 

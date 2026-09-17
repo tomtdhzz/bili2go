@@ -1,17 +1,18 @@
-# bili2go 分析链路的 docker 边界：仅 LLM 摘要服务。
+# bili2go 自托管分析栈：两服务组合，单机一键起。
 #
-# 边界说明：video-digest（转写 + 画面关键字）依赖 macOS 原生框架
-# （AVFoundation/Speech/Vision），无法进容器，运行在宿主机；本 compose 只承载
-# 可容器化的 LLM 摘要部分。bili2go 宿主进程 exec 宿主 video-digest，再通过
-# HTTP 调用此服务产出 summary.md。
+# - bili2go：serve —— 下载 + 容器内 whisper.cpp 转写 + 编排，暴露 /api/analyze、/api/info、/download。
+# - summarizer：LLM/回退摘要服务（digest.json -> 五节 summary.md）。
+#
+# 转写改用容器内 whisper.cpp（不再依赖 macOS video-digest）；whisper 模型不进镜像，挂 ./models 卷。
 #
 # 用法：
+#   mkdir -p models && curl -L -o models/ggml-small.bin \
+#     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 #   cd deploy && docker compose up -d --build
-#   # 接真实 LLM（OpenAI 兼容端点）：
-#   OPENAI_BASE_URL=https://api.openai.com/v1 OPENAI_API_KEY=sk-... docker compose up -d --build
-#   # 暴露到 localhost 之外时设 token 开启鉴权（客户端 -summarizer-token / env BILI_SUMMARIZER_TOKEN）：
-#   SUMMARIZER_TOKEN=$(openssl rand -hex 32) docker compose up -d --build
-#   # 不配 LLM 时服务走确定性模板回退，离线可用。
+#   curl -X POST 'http://127.0.0.1:8090/api/analyze?bvid={BVID}'
+#   # 接真实 LLM：    OPENAI_BASE_URL=... OPENAI_API_KEY=... docker compose up -d --build
+#   # 摘要鉴权：      SUMMARIZER_TOKEN=$(openssl rand -hex 32) docker compose up -d --build
+#   # 高清需登录态：  BILI_SESSDATA=... docker compose up -d --build
 services:
   summarizer:
     build:
@@ -26,4 +27,21 @@ services:
       OPENAI_MODEL: "${OPENAI_MODEL:-gpt-4o-mini}"
       SUMMARY_TOP: "${SUMMARY_TOP:-25}"
       SUMMARIZER_TOKEN: "${SUMMARIZER_TOKEN:-}"
+    restart: unless-stopped
+  bili2go:
+    build:
+      context: ..
+      dockerfile: deploy/bili2go/Dockerfile
+    image: bili2go:latest
+    ports:
+      - "8090:8090"
+    environment:
+      BILI_SUMMARIZER_URL: "http://summarizer:8091"
+      BILI_SUMMARIZER_TOKEN: "${SUMMARIZER_TOKEN:-}"
+      WHISPER_MODEL: "/models/ggml-small.bin"
+      BILI_SESSDATA: "${BILI_SESSDATA:-}"
+    volumes:
+      - ./models:/models:ro
+    depends_on:
+      - summarizer
     restart: unless-stopped

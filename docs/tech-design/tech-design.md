@@ -248,7 +248,7 @@ type Muxer          interface { Mux(ctx context.Context, videoPath, audioPath, d
 ```
 bili2go info  -bvid <BV|url> [-page N]                        # 打印与 /api/info 同款 JSON
 bili2go dl    -bvid <BV|url> [-page N] [-qn 80] [-codec avc] -o out.mp4
-bili2go serve [-addr :8080]                                   # 启动 HTTP 服务
+bili2go serve [-addr :8090]                                   # 启动 HTTP 服务
 # SESSDATA：环境变量 BILI_SESSDATA 或 -sessdata 传入
 ```
 示例：

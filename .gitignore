@@ -12,6 +12,8 @@
 *.mp4
 *.m4s
 *.flv
+*.bin
+/deploy/models/
 
 # go
 *.test
