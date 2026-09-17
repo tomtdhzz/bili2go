@@ -179,6 +179,8 @@ func cmdServe(args []string) int {
 	whisperModel := fs.String("whisper-model", "", "whisper ggml 模型路径（默认 env WHISPER_MODEL）")
 	digestBin := fs.String("digest-bin", "", "改用 macOS video-digest 二进制（默认空=用本地 whisper 适配器）")
 	lang := fs.String("lang", "zh", "转写语言")
+	keywords := fs.String("keywords", "unspoken", "画面 OCR 关键字 none|unspoken|all（none=跳过 OCR）")
+	tesseractBin := fs.String("tesseract-bin", "", "tesseract CLI（默认 tesseract；OCR 用）")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -190,7 +192,12 @@ func cmdServe(args []string) int {
 	if *digestBin != "" {
 		digester = analyze.NewExecDigester(*digestBin)
 	} else {
-		digester = analyze.NewLocalDigester(*whisperBin, *whisperModel, *lang)
+		ld := analyze.NewLocalDigester(*whisperBin, *whisperModel, *lang)
+		ld.Keywords = *keywords
+		if *tesseractBin != "" {
+			ld.TesseractBin = *tesseractBin
+		}
+		digester = ld
 	}
 	sumURL := *summarizerURL
 	if sumURL == "" {

@@ -58,7 +58,7 @@ func TestParseProbe(t *testing.T) {
 func TestAssembleDigestSchema(t *testing.T) {
 	segs, _ := parseWhisperJSON([]byte(whisperFixture))
 	src, _ := parseProbe([]byte(probeAV))
-	dj := assembleDigest("/tmp/x.mp4", src, "whisper", "zh", segs)
+	dj := assembleDigest("/tmp/x.mp4", src, "whisper", "zh", segs, nil)
 	raw, err := json.Marshal(dj)
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestAssembleDigestSchema(t *testing.T) {
 // TestAssembleDigestNoAudio：无音轨 → engine none、segments 空、仍合规。
 func TestAssembleDigestNoAudio(t *testing.T) {
 	src, _ := parseProbe([]byte(probeSilent))
-	dj := assembleDigest("/tmp/x.mp4", src, "none", "zh", nil)
+	dj := assembleDigest("/tmp/x.mp4", src, "none", "zh", nil, nil)
 	raw, _ := json.Marshal(dj)
 	meta, err := parseMeta(raw)
 	if err != nil {

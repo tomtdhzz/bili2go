@@ -25,6 +25,10 @@ type LocalDigester struct {
 	WhisperBin   string // 默认 "whisper-cli"（whisper.cpp 的 CLI）
 	WhisperModel string // ggml 模型路径（默认取 env WHISPER_MODEL）
 	Lang         string // 转写语言，默认 "zh"
+	TesseractBin string // 默认 "tesseract"（画面 OCR）
+	Keywords     string // none|unspoken|all，默认 "unspoken"（none=跳过 OCR）
+	OCRLang      string // tesseract 语言，默认 "chi_sim+eng"
+	MaxFrames    int    // OCR 抽帧上限，默认 60
 }
 
 // NewLocalDigester 用默认参数构造；空字段回落到默认二进制名与 env。
@@ -45,6 +49,18 @@ func NewLocalDigester(whisperBin, model, lang string) *LocalDigester {
 	if d.Lang == "" {
 		d.Lang = "zh"
 	}
+	if d.TesseractBin == "" {
+		d.TesseractBin = "tesseract"
+	}
+	if d.Keywords == "" {
+		d.Keywords = "unspoken"
+	}
+	if d.OCRLang == "" {
+		d.OCRLang = "chi_sim+eng"
+	}
+	if d.MaxFrames == 0 {
+		d.MaxFrames = 60
+	}
 	return d
 }
 
@@ -58,12 +74,12 @@ type sourceInfo struct {
 
 // digestJSON 是产出 digest.json 的强类型形状（本适配器是生产方，schema 固定）。
 type digestJSON struct {
-	SchemaVersion  string        `json:"schema_version"`
-	Source         digestSource  `json:"source"`
-	Transcript     digestTr      `json:"transcript"`
-	ScreenKeywords []any         `json:"screen_keywords"`
-	Gaps           []string      `json:"gaps"`
-	Frames         []any         `json:"frames"`
+	SchemaVersion  string              `json:"schema_version"`
+	Source         digestSource        `json:"source"`
+	Transcript     digestTr            `json:"transcript"`
+	ScreenKeywords []screenKeywordJSON `json:"screen_keywords"`
+	Gaps           []string            `json:"gaps"`
+	Frames         []any               `json:"frames"`
 }
 
 type digestSource struct {
@@ -75,10 +91,10 @@ type digestSource struct {
 }
 
 type digestTr struct {
-	Engine   string        `json:"engine"`
-	Locale   string        `json:"locale"`
-	Segments []digestSeg   `json:"segments"`
-	Text     string        `json:"text"`
+	Engine   string      `json:"engine"`
+	Locale   string      `json:"locale"`
+	Segments []digestSeg `json:"segments"`
+	Text     string      `json:"text"`
 }
 
 type digestSeg struct {
@@ -111,7 +127,16 @@ func (d *LocalDigester) Digest(ctx context.Context, videoPath, outDir string) (D
 		}
 	}
 
-	dj := assembleDigest(videoPath, src, engine, d.Lang, segs)
+	keywords := []screenKeywordJSON{}
+	if d.Keywords != "none" {
+		if kw, oerr := d.ocr(ctx, videoPath, outDir, src.DurationS, joinSegText(segs)); oerr != nil {
+			fmt.Fprintf(os.Stderr, "localdigest: OCR 失败，按无画面关键字降级: %v\n", oerr)
+		} else {
+			keywords = kw
+		}
+	}
+
+	dj := assembleDigest(videoPath, src, engine, d.Lang, segs, keywords)
 	raw, err := json.MarshalIndent(dj, "", "  ")
 	if err != nil {
 		return DigestOutput{}, err
@@ -235,9 +260,12 @@ func parseWhisperJSON(raw []byte) ([]digestSeg, error) {
 }
 
 // assembleDigest 组装与摘要消费方逐字兼容的 digest.json 结构。
-func assembleDigest(videoPath string, src sourceInfo, engine, locale string, segs []digestSeg) digestJSON {
+func assembleDigest(videoPath string, src sourceInfo, engine, locale string, segs []digestSeg, keywords []screenKeywordJSON) digestJSON {
 	if segs == nil {
 		segs = []digestSeg{}
+	}
+	if keywords == nil {
+		keywords = []screenKeywordJSON{}
 	}
 	texts := make([]string, 0, len(segs))
 	for _, s := range segs {
@@ -258,7 +286,7 @@ func assembleDigest(videoPath string, src sourceInfo, engine, locale string, seg
 			Segments: segs,
 			Text:     strings.Join(texts, ""),
 		},
-		ScreenKeywords: []any{},
+		ScreenKeywords: keywords,
 		Gaps:           []string{},
 		Frames:         []any{},
 	}

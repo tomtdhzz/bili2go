@@ -55,21 +55,23 @@ this project uses date-based entries (no semantic version tags yet).
   auth and offline fallback all unchanged; `internal/analyze` consumer untouched. Docker image is now a
   distroless static binary (~3 MB vs the Python image), health check via `summarizer health` (no shell).
   Design: `docs/prd/PRD-summarizer-go.md`, `docs/tech-design/tech-design-summarizer-go.md`.
-- Self-hosted, request-driven analysis (phase 1 — transcription): `serve` now exposes
+- Self-hosted, request-driven analysis (transcription + on-screen OCR): `serve` now exposes
   `POST /api/analyze?bvid=<BV|url>[&page&qn&codec]` → download → digest → summarize →
   `200 {markdown, model, fallback, title, engine, segments, duration_s, ...}`. Reuses the
   WS-A limiter (heavy op, saturation → 429); missing bvid → 400; unconfigured → 501.
   - `internal/analyze` `LocalDigester` — a containerizable `Digester` (parallel to the
     macOS-only `ExecDigester`) that execs `ffprobe`+`ffmpeg`+`whisper.cpp` to produce a
-    schema-compatible `digest.json` (`transcript.engine="whisper"`). Phase 1 leaves
-    `screen_keywords` empty (summarizer degrades gracefully); OCR keywords are phase 2.
-  - `serve` gains `-whisper-bin`/`-whisper-model`/`-lang`/`-summarizer`/`-summarizer-token`,
-    and `-digest-bin` to opt back into macOS `video-digest`.
+    schema-compatible `digest.json` (`transcript.engine="whisper"`). It also samples frames with
+    ffmpeg and OCRs them with `tesseract` to fill `screen_keywords` (on-screen text not spoken),
+    flagging `spoken_in_transcript` (dual evidence) and `is_chrome` (persistent UI/watermark,
+    excluded); OCR gracefully skips to empty when tesseract is unavailable.
+  - `serve` gains `-whisper-bin`/`-whisper-model`/`-lang`/`-keywords`/`-tesseract-bin`/`-summarizer`/
+    `-summarizer-token`, and `-digest-bin` to opt back into macOS `video-digest`.
   - `serve -artifact-dir DIR` optionally persists each request's `video.mp4` + `summary.md` +
     `digest.json` under `DIR/<bvid>[-p<page>]/` and returns `video_path`/`summary_path`/`digest_path`;
     a repeat request for the same `bvid`(+`page`) is served from those artifacts (`"cached":true`) with
     no re-download/transcribe and no limiter slot. Default stays stateless (temp files, deleted).
-  - `deploy/bili2go/Dockerfile` (debian-slim + ffmpeg + statically-built `whisper-cli`) +
+  - `deploy/bili2go/Dockerfile` (debian-slim + ffmpeg + `tesseract-ocr`(chi_sim/eng) + statically-built `whisper-cli`) +
     `docker-compose.yml` `bili2go` service; whisper model mounted via `./models`. Runs on
     Linux — no macOS dependency. Design: `docs/prd/PRD-self-hosted-analyze.md`,
     `docs/tech-design/tech-design-self-hosted-analyze.md`.
