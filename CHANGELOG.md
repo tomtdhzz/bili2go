@@ -86,6 +86,9 @@ this project uses date-based entries (no semantic version tags yet).
   browsable/searchable knowledge base. Disk-backed JSON store (survives restart; queued/running jobs
   re-enqueued on start) behind a `Store` interface (SQLite/Postgres can drop in later). `-job-workers`
   sets pool size.
+- Knowledge-base web UI: `serve -jobs-dir` also serves a server-rendered browser UI —
+  `GET /kb` lists recent analyses with a search box (backed by the same full-text search),
+  `GET /kb/{id}` renders a summary. `html/template` (auto-escaped), zero JS/deps.
 
 ### Fixed
 - `internal/media` ffmpeg muxer now passes explicit `-f mp4`, so muxing no longer depends on the output filename's extension (cache temp files are not `.mp4`).

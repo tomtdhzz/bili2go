@@ -87,6 +87,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/analyze", s.handleAnalyze)
 	mux.HandleFunc("/api/jobs", s.handleJobs)
 	mux.HandleFunc("/api/jobs/", s.handleJobByID)
+	mux.HandleFunc("/kb", s.handleKBIndex)
+	mux.HandleFunc("/kb/", s.handleKBDetail)
 	return mux
 }
 

@@ -103,6 +103,7 @@ curl -X POST 'http://127.0.0.1:8090/api/analyze?bvid={BVID}'
 | `POST /api/jobs` | `bvid`(必), `page`, `qn`, `codec` | **异步分析任务**（需 serve `-jobs-dir`）：入队并回 `202 {id,status}`，后台 worker 跑完 |
 | `GET /api/jobs/{id}` | — | 查任务状态与结果（`queued`/`running`/`done`/`error` + `result`） |
 | `GET /api/jobs` | `limit`, `q` | 列出最近任务（知识库浏览）；带 `q` 对已存 summary 全文检索 |
+| `GET /kb`, `GET /kb/{id}` | `q` | **知识库网页**（需 serve `-jobs-dir`）：浏览器打开列表/搜索/阅读 summary（服务端渲染） |
 
 错误返回非 2xx + `{"code":<int>,"message":"<str>"}`。
 
